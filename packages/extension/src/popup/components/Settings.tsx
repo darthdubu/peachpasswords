@@ -8,11 +8,12 @@ import { Icons } from './icons'
 import { STORAGE_KEYS } from '../../lib/constants'
 import QRCode from 'react-qr-code'
 import { parseCSV } from '../../lib/importers'
+import { EncryptedSettings } from '../../lib/crypto-utils'
 
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
 
 export function Settings() {
-  const { lockVault, syncStatus, s3SyncStatus, importEntries, vault, decryptValue } = useVault()
+  const { lockVault, syncStatus, s3SyncStatus, importEntries, vault, decryptValue, encryptSettingsData, decryptSettingsData } = useVault()
   const { theme, setTheme, colorScheme, setColorScheme } = useTheme()
   const [serverUrl, setServerUrl] = useState('')
   const [syncSecret, setSyncSecret] = useState('')
@@ -26,32 +27,60 @@ export function Settings() {
   const [isUploading, setIsUploading] = useState(false)
 
   useEffect(() => {
-    chrome.storage.local.get([STORAGE_KEYS.SETTINGS]).then(result => {
-      if (result[STORAGE_KEYS.SETTINGS]) {
-        setServerUrl(result[STORAGE_KEYS.SETTINGS].serverUrl || '')
-        setSyncSecret(result[STORAGE_KEYS.SETTINGS].syncSecret || '')
-        setS3Endpoint(result[STORAGE_KEYS.SETTINGS].s3Endpoint || 'https://s3.fr-par.scw.cloud')
-        setS3Region(result[STORAGE_KEYS.SETTINGS].s3Region || 'fr-par')
-        setS3AccessKey(result[STORAGE_KEYS.SETTINGS].s3AccessKey || '')
-        setS3SecretKey(result[STORAGE_KEYS.SETTINGS].s3SecretKey || '')
-        setS3Bucket(result[STORAGE_KEYS.SETTINGS].s3Bucket || '')
+    const loadSettings = async () => {
+      const result = await chrome.storage.local.get([STORAGE_KEYS.SETTINGS])
+      if (!result[STORAGE_KEYS.SETTINGS]) return
+
+      const settingsData = result[STORAGE_KEYS.SETTINGS]
+
+      if (settingsData.encrypted) {
+        const decrypted = await decryptSettingsData(settingsData.encrypted as EncryptedSettings)
+        if (decrypted) {
+          setServerUrl(decrypted.serverUrl || '')
+          setSyncSecret(decrypted.syncSecret || '')
+          setS3Endpoint(decrypted.s3Endpoint || 'https://s3.fr-par.scw.cloud')
+          setS3Region(decrypted.s3Region || 'fr-par')
+          setS3AccessKey(decrypted.s3AccessKey || '')
+          setS3SecretKey(decrypted.s3SecretKey || '')
+          setS3Bucket(decrypted.s3Bucket || '')
+        }
+      } else {
+        setServerUrl(settingsData.serverUrl || '')
+        setSyncSecret(settingsData.syncSecret || '')
+        setS3Endpoint(settingsData.s3Endpoint || 'https://s3.fr-par.scw.cloud')
+        setS3Region(settingsData.s3Region || 'fr-par')
+        setS3AccessKey(settingsData.s3AccessKey || '')
+        setS3SecretKey(settingsData.s3SecretKey || '')
+        setS3Bucket(settingsData.s3Bucket || '')
       }
-    })
-  }, [])
+    }
+    loadSettings()
+  }, [decryptSettingsData])
 
   const handleSave = async () => {
-    await chrome.storage.local.set({
-      [STORAGE_KEYS.SETTINGS]: {
-        serverUrl,
-        syncSecret,
-        s3Endpoint,
-        s3Region,
-        s3AccessKey,
-        s3SecretKey,
-        s3Bucket
-      }
-    })
-    // TODO: Show toast
+    const settingsToEncrypt = {
+      serverUrl,
+      syncSecret,
+      s3Endpoint,
+      s3Region,
+      s3AccessKey,
+      s3SecretKey,
+      s3Bucket
+    }
+
+    const encrypted = await encryptSettingsData(settingsToEncrypt)
+    if (encrypted) {
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.SETTINGS]: {
+          encrypted,
+          hasCredentials: !!(s3AccessKey || s3SecretKey || syncSecret)
+        }
+      })
+    } else {
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.SETTINGS]: settingsToEncrypt
+      })
+    }
   }
 
   const handleExport = async () => {

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { Vault, VaultEntry } from '@lotus/shared'
-import { deriveKeyFromPassword, encrypt, decrypt, generateSalt, bufferToBase64, base64ToBuffer, deriveSubKey } from '../../lib/crypto-utils'
+import { deriveKeyFromPassword, encrypt, decrypt, generateSalt, bufferToBase64, base64ToBuffer, deriveSubKey, encryptSettings, decryptSettings, EncryptedSettings } from '../../lib/crypto-utils'
 import { VAULT_IDLE_TIMEOUT } from '../../lib/constants'
 import { useSync } from '../hooks/useSync'
 import { useS3Sync } from '../hooks/useS3Sync'
@@ -27,6 +27,8 @@ interface VaultContextType {
   s3SyncStatus: 'disconnected' | 'connecting' | 'connected' | 'error'
   pendingSave: { url: string, username: string, password: string } | null
   clearPendingSave: () => void
+  encryptSettingsData: (settings: Record<string, string>) => Promise<EncryptedSettings | null>
+  decryptSettingsData: (encrypted: EncryptedSettings) => Promise<Record<string, string> | null>
 }
 
 const VaultContext = createContext<VaultContextType | undefined>(undefined)
@@ -304,6 +306,16 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     chrome.storage.session.remove('pendingSave')
   }, [])
 
+  const encryptSettingsData = useCallback(async (settings: Record<string, string>): Promise<EncryptedSettings | null> => {
+    if (!masterKey) return null
+    return encryptSettings(masterKey, settings)
+  }, [masterKey])
+
+  const decryptSettingsData = useCallback(async (encrypted: EncryptedSettings): Promise<Record<string, string> | null> => {
+    if (!masterKey) return null
+    return decryptSettings(masterKey, encrypted)
+  }, [masterKey])
+
   // Check for pending saves
   useEffect(() => {
     chrome.storage.session.get('pendingSave').then(res => {
@@ -344,7 +356,9 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     syncStatus,
     s3SyncStatus: s3Status,
     pendingSave,
-    clearPendingSave
+    clearPendingSave,
+    encryptSettingsData,
+    decryptSettingsData
   }
 
   return (

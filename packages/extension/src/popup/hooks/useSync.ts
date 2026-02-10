@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Vault } from '@lotus/shared'
 import { STORAGE_KEYS } from '../../lib/constants'
-import { bufferToBase64, base64ToBuffer, decrypt, deriveSubKey } from '../../lib/crypto-utils'
+import { bufferToBase64, base64ToBuffer, decrypt, deriveSubKey, decryptSettings, EncryptedSettings } from '../../lib/crypto-utils'
 
 // LOTUS-018: Generate nonce for replay protection
 function generateNonce(): string {
@@ -10,6 +10,11 @@ function generateNonce(): string {
     .map(b => b.toString(36).padStart(2, '0'))
     .join('')
   return `${timestamp}-${random}`
+}
+
+interface SyncSettings {
+  serverUrl?: string
+  syncSecret?: string
 }
 
 export function useSync(
@@ -23,9 +28,18 @@ export function useSync(
 
   const sync = useCallback(async () => {
     if (!vault || !masterKey || isSyncing.current) return
-    
+
     const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS)
-    const { serverUrl, syncSecret } = result[STORAGE_KEYS.SETTINGS] || {}
+    let settings: SyncSettings = {}
+
+    if (result[STORAGE_KEYS.SETTINGS]?.encrypted) {
+      const decrypted = await decryptSettings(masterKey, result[STORAGE_KEYS.SETTINGS].encrypted as EncryptedSettings)
+      settings = decrypted || {}
+    } else {
+      settings = result[STORAGE_KEYS.SETTINGS] || {}
+    }
+
+    const { serverUrl, syncSecret } = settings
     if (!serverUrl || !syncSecret) return
 
     let httpUrl = serverUrl

@@ -2,7 +2,15 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { Vault } from '@lotus/shared'
 import { STORAGE_KEYS } from '../../lib/constants'
-import { bufferToBase64, base64ToBuffer, decrypt, deriveSubKey } from '../../lib/crypto-utils'
+import { bufferToBase64, base64ToBuffer, decrypt, deriveSubKey, decryptSettings, EncryptedSettings } from '../../lib/crypto-utils'
+
+interface S3Settings {
+  s3Endpoint?: string
+  s3Region?: string
+  s3AccessKey?: string
+  s3SecretKey?: string
+  s3Bucket?: string
+}
 
 export function useS3Sync(
   vault: Vault | null,
@@ -14,10 +22,19 @@ export function useS3Sync(
 
   const syncS3 = useCallback(async () => {
     if (!vault || !masterKey || isSyncing.current) return
-    
+
     const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS)
-    const { s3Endpoint, s3Region, s3AccessKey, s3SecretKey, s3Bucket } = result[STORAGE_KEYS.SETTINGS] || {}
-    
+    let settings: S3Settings = {}
+
+    if (result[STORAGE_KEYS.SETTINGS]?.encrypted) {
+      const decrypted = await decryptSettings(masterKey, result[STORAGE_KEYS.SETTINGS].encrypted as EncryptedSettings)
+      settings = decrypted || {}
+    } else {
+      settings = result[STORAGE_KEYS.SETTINGS] || {}
+    }
+
+    const { s3Endpoint, s3Region, s3AccessKey, s3SecretKey, s3Bucket } = settings
+
     if (!s3Endpoint || !s3Bucket || !s3AccessKey || !s3SecretKey) {
         setS3Status('disconnected')
         return
