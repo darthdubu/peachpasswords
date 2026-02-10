@@ -76,7 +76,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const { syncStatus } = useSync(vault, masterKey, handlePull)
   const { s3Status } = useS3Sync(vault, masterKey, handlePull)
 
-  const lockVault = useCallback(() => {
+  const lockVault = useCallback(async () => {
     setVault(null)
     setIsUnlocked(false)
     setMasterKey(null)
@@ -86,16 +86,26 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // SECURITY FIX (LOTUS-001): Do NOT remove 'vault' - encrypted vault should persist
     // Only remove the masterKey from session storage
     chrome.storage.session.remove(['masterKey'])
+    // LOTUS-014: Notify background to clear alarm
+    await chrome.runtime.sendMessage({ type: 'LOCK_NOW' }).catch(() => {})
   }, [idleTimer])
 
-  // Auto-lock functionality
+  // Auto-lock functionality using chrome.alarms (LOTUS-014)
   const resetIdleTimer = useCallback(() => {
+    // Clear any existing local timer
     if (idleTimer) clearTimeout(idleTimer)
+
+    // Schedule background alarm
+    chrome.runtime.sendMessage({ type: 'SCHEDULE_LOCK' }).catch(() => {})
+
+    // Also set a local timer as fallback for when popup is open
     const timer = setTimeout(() => {
       lockVault()
     }, VAULT_IDLE_TIMEOUT)
     setIdleTimer(timer)
   }, [idleTimer, lockVault])
+
+
 
   const createVault = useCallback(async (password: string) => {
     setIsLoading(true)

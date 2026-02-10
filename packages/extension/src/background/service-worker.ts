@@ -1,10 +1,48 @@
 import { decrypt, base64ToBuffer, deriveSubKey } from '../lib/crypto-utils'
 import { Vault } from '@lotus/shared'
 
+const LOCK_ALARM_NAME = 'lotus-auto-lock'
+const LOCK_DELAY_MS = 5 * 60 * 1000 // 5 minutes
+
 // Background service worker initialized silently
 
 chrome.runtime.onInstalled.addListener(() => {
   // Extension installed successfully
+})
+
+// LOTUS-014: Handle auto-lock alarm
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === LOCK_ALARM_NAME) {
+    // Clear all session data to lock the vault
+    chrome.storage.session.remove(['masterKey', 'pendingSave'])
+    chrome.action.setBadgeText({ text: '' })
+  }
+})
+
+// Listen for messages to schedule or clear lock alarm
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'SCHEDULE_LOCK') {
+    // Schedule auto-lock alarm
+    chrome.alarms.create(LOCK_ALARM_NAME, { delayInMinutes: LOCK_DELAY_MS / 60000 })
+    sendResponse({ success: true })
+    return true
+  }
+
+  if (message.type === 'CLEAR_LOCK') {
+    // Clear auto-lock alarm (user is active)
+    chrome.alarms.clear(LOCK_ALARM_NAME)
+    sendResponse({ success: true })
+    return true
+  }
+
+  if (message.type === 'LOCK_NOW') {
+    // Immediate lock
+    chrome.storage.session.remove(['masterKey', 'pendingSave'])
+    chrome.action.setBadgeText({ text: '' })
+    chrome.alarms.clear(LOCK_ALARM_NAME)
+    sendResponse({ success: true })
+    return true
+  }
 })
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
