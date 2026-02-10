@@ -18,8 +18,8 @@ interface VaultContextType {
   deleteEntry: (entryId: string) => Promise<void>
   getEntry: (entryId: string) => VaultEntry | null
   searchEntries: (query: string) => VaultEntry[]
-  encryptValue: (value: string, entryId: string) => Promise<string>
-  decryptValue: (ciphertext: string, entryId: string) => Promise<string>
+  encryptValue: (value: string, entryId: string, modified?: number) => Promise<string>
+  decryptValue: (ciphertext: string, entryId: string, modified?: number) => Promise<string>
   isLoading: boolean
   error: string | null
   vaultExists: boolean
@@ -64,7 +64,9 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ? vaultBytes.buffer
       : vaultBytes.buffer.slice(vaultBytes.byteOffset, vaultBytes.byteOffset + vaultBytes.byteLength)
 
-    const encryptedVault = await encrypt(vaultKey, dataBuffer)
+    // LOTUS-009: Use AAD (version + syncVersion) for vault encryption
+    const aad = new TextEncoder().encode(`vault:${vaultData.version}:${vaultData.syncVersion}`).buffer as ArrayBuffer
+    const encryptedVault = await encrypt(vaultKey, dataBuffer as ArrayBuffer, aad)
 
     await chrome.storage.local.set({
       vault: Array.from(new Uint8Array(encryptedVault)),
@@ -164,7 +166,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       
       // Derive vault encryption key
       const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
-      
+
       // Decrypt vault
       const encryptedVault = new Uint8Array(result.vault)
       const decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
@@ -256,19 +258,28 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     )
   }, [vault])
 
-  const encryptValue = useCallback(async (value: string, entryId: string): Promise<string> => {
+  const encryptValue = useCallback(async (value: string, entryId: string, modified?: number): Promise<string> => {
     if (!masterKey) throw new Error('Vault locked')
     const entryKey = await deriveSubKey(masterKey, `entry-${entryId}`, ['encrypt', 'decrypt'])
     const encoded = new TextEncoder().encode(value)
-    const encrypted = await encrypt(entryKey, encoded.buffer)
+    // LOTUS-009: Use AAD (entry ID + timestamp) to bind ciphertext to context
+    const aadData = `${entryId}:${modified || Date.now()}`
+    const aad = new TextEncoder().encode(aadData).buffer as ArrayBuffer
+    const encrypted = await encrypt(entryKey, encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength) as ArrayBuffer, aad)
     return bufferToBase64(encrypted)
   }, [masterKey])
 
-  const decryptValue = useCallback(async (ciphertext: string, entryId: string): Promise<string> => {
+  const decryptValue = useCallback(async (ciphertext: string, entryId: string, modified?: number): Promise<string> => {
     if (!masterKey) throw new Error('Vault locked')
     const entryKey = await deriveSubKey(masterKey, `entry-${entryId}`, ['encrypt', 'decrypt'])
     const buffer = base64ToBuffer(ciphertext)
-    const decrypted = await decrypt(entryKey, buffer)
+    // LOTUS-009: Pass AAD for integrity verification
+    let aad: ArrayBuffer | undefined
+    if (modified) {
+      const aadData = `${entryId}:${modified}`
+      aad = new TextEncoder().encode(aadData).buffer as ArrayBuffer
+    }
+    const decrypted = await decrypt(entryKey, buffer, aad)
     return new TextDecoder().decode(decrypted)
   }, [masterKey])
 
