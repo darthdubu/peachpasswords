@@ -91,8 +91,8 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIdleTimer(null)
     // Clear sensitive data from memory
     // SECURITY FIX (LOTUS-001): Do NOT remove 'vault' - encrypted vault should persist
-    // LOTUS-007: Remove autofillKey instead of masterKey
-    chrome.storage.session.remove(['autofillKey'])
+    // LOTUS-007: Remove autofillKey and autofillData
+    chrome.storage.session.remove(['autofillKey', 'autofillData'])
     // LOTUS-014: Notify background to clear alarm
     await chrome.runtime.sendMessage({ type: 'LOCK_NOW' }).catch(() => {})
   }, [idleTimer])
@@ -136,11 +136,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setIsUnlocked(true)
       setVaultExists(true)
 
-      // LOTUS-007: Export derived autofill key instead of master key
-      // This key can only decrypt autofill data, not the full vault
-      const autofillKey = await deriveSubKey(key, 'autofill-only', ['encrypt', 'decrypt'])
-      const exportedAutofillKey = await crypto.subtle.exportKey('jwk', autofillKey)
-      await chrome.storage.session.set({ autofillKey: exportedAutofillKey })
+      await exportAutofillData(newVault, key)
       
       await saveVault(newVault, key)
       resetIdleTimer()
@@ -151,6 +147,40 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setIsLoading(false)
     }
   }, [resetIdleTimer])
+
+  const exportAutofillData = async (vaultData: Vault, masterKey: CryptoKey) => {
+    try {
+      const autofillKey = await deriveSubKey(masterKey, 'autofill-only', ['encrypt', 'decrypt'])
+      const exportedAutofillKey = await crypto.subtle.exportKey('jwk', autofillKey)
+      
+      const autofillData = []
+      for (const entry of vaultData.entries) {
+        if (entry.type === 'login' && entry.login && entry.login.urls && entry.login.urls.length > 0) {
+          const data = {
+            urls: entry.login.urls,
+            username: entry.login.username,
+            password: entry.login.password || ''
+          }
+          const encoded = new TextEncoder().encode(JSON.stringify(data))
+          const encrypted = await encrypt(autofillKey, encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength) as ArrayBuffer)
+          const iv = encrypted.slice(0, 12)
+          const ciphertext = encrypted.slice(12)
+          autofillData.push({
+            urls: entry.login.urls,
+            iv: bufferToBase64(iv),
+            ciphertext: bufferToBase64(ciphertext)
+          })
+        }
+      }
+      
+      await chrome.storage.session.set({ 
+        autofillKey: exportedAutofillKey,
+        autofillData 
+      })
+    } catch (err) {
+      console.error('Failed to export autofill data:', err)
+    }
+  }
 
   const unlockVault = useCallback(async (password: string): Promise<boolean> => {
     setIsLoading(true)
@@ -166,28 +196,41 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const salt = new Uint8Array(result.salt)
       const key = await deriveKeyFromPassword(password, salt)
       
-      // Derive vault encryption key
       const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
 
-      // Decrypt vault
       const encryptedVault = new Uint8Array(result.vault)
-      const decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
+      let decryptedData: ArrayBuffer
+      let needsMigration = false
+
+      try {
+        const aad = new TextEncoder().encode(`vault:${result.vault.version || 1}:${result.vault.syncVersion || 0}`).buffer as ArrayBuffer
+        decryptedData = await decrypt(vaultKey, encryptedVault.buffer, aad)
+      } catch {
+        try {
+          decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
+          needsMigration = true
+        } catch {
+          throw new Error('Failed to decrypt vault')
+        }
+      }
+
       const vaultData = JSON.parse(new TextDecoder().decode(decryptedData))
 
-      // LOTUS-005: Verify vault integrity
       const isValid = await verifyVaultIntegrity(vaultData)
       if (!isValid) {
         throw new Error('Vault integrity check failed - possible tampering detected')
+      }
+
+      if (needsMigration) {
+        await saveVault(vaultData, key)
       }
 
       setVault(vaultData)
       setMasterKey(key)
       setIsUnlocked(true)
 
-      // LOTUS-007: Export derived autofill key instead of master key
-      const autofillKey = await deriveSubKey(key, 'autofill-only', ['encrypt', 'decrypt'])
-      const exportedAutofillKey = await crypto.subtle.exportKey('jwk', autofillKey)
-      await chrome.storage.session.set({ autofillKey: exportedAutofillKey })
+      // Export autofill data for background script
+      await exportAutofillData(vaultData, key)
 
       resetIdleTimer()
       
@@ -202,44 +245,47 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const addEntry = useCallback(async (entry: VaultEntry) => {
     if (!vault || !masterKey) return
-    
+
     const newVault = {
       ...vault,
       entries: [...vault.entries, entry],
       lastSync: Date.now(),
       syncVersion: vault.syncVersion + 1
     }
-    
+
     setVault(newVault)
     await saveVault(newVault, masterKey)
+    await exportAutofillData(newVault, masterKey)
   }, [vault, masterKey])
 
   const updateEntry = useCallback(async (entry: VaultEntry) => {
     if (!vault || !masterKey) return
-    
+
     const newVault = {
       ...vault,
       entries: vault.entries.map(e => e.id === entry.id ? entry : e),
       lastSync: Date.now(),
       syncVersion: vault.syncVersion + 1
     }
-    
+
     setVault(newVault)
     await saveVault(newVault, masterKey)
+    await exportAutofillData(newVault, masterKey)
   }, [vault, masterKey])
 
   const deleteEntry = useCallback(async (entryId: string) => {
     if (!vault || !masterKey) return
-    
+
     const newVault = {
       ...vault,
       entries: vault.entries.filter(e => e.id !== entryId),
       lastSync: Date.now(),
       syncVersion: vault.syncVersion + 1
     }
-    
+
     setVault(newVault)
     await saveVault(newVault, masterKey)
+    await exportAutofillData(newVault, masterKey)
   }, [vault, masterKey])
 
   const getEntry = useCallback((entryId: string): VaultEntry | null => {
@@ -319,9 +365,10 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       lastSync: Date.now(),
       syncVersion: vault.syncVersion + 1
     }
-    
+
     setVault(newVault)
     await saveVault(newVault, masterKey)
+    await exportAutofillData(newVault, masterKey)
   }, [vault, masterKey, encryptValue])
 
   const clearPendingSave = useCallback(() => {

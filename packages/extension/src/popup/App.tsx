@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { VaultProvider, useVault } from './contexts/VaultContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { UnlockScreen } from './components/UnlockScreen'
@@ -40,7 +41,12 @@ function Main() {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
-        <Icons.refresh className="h-8 w-8 animate-spin text-primary" />
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+        >
+          <Icons.refresh className="h-8 w-8 text-primary" />
+        </motion.div>
       </div>
     )
   }
@@ -84,10 +90,14 @@ function Main() {
     setView('list')
   }
 
-  // Header for non-list views
   const Header = ({ title, onBack }: { title: string, onBack: () => void }) => (
-    <div className="flex items-center p-4 border-b bg-background">
-      <Button variant="ghost" size="icon" onClick={onBack} className="mr-2">
+    <div className="flex items-center p-4 glass border-b border-border/50">
+      <Button 
+        variant="ghost" 
+        size="icon" 
+        onClick={onBack} 
+        className="mr-2 hover:bg-secondary/80 transition-colors"
+      >
         <Icons.chevronRight className="h-4 w-4 rotate-180" />
       </Button>
       <h2 className="font-semibold text-lg flex-1">{title}</h2>
@@ -95,58 +105,93 @@ function Main() {
   )
 
   return (
-    <div className="w-[380px] h-[560px] bg-background text-foreground overflow-hidden flex flex-col">
-      {view === 'list' && (
-        <>
-          <div className="flex items-center justify-between p-4 border-b">
-            <h1 className="text-xl font-bold text-primary">Lotus</h1>
-            <div className="flex gap-2">
-              {(syncStatus === 'error' || s3SyncStatus === 'error') && (
-                 <div className="flex items-center justify-center w-9 h-9" title={syncStatus === 'error' ? 'Local Sync Error' : 'S3 Sync Error'}>
-                    <Icons.cloud className="h-4 w-4 text-destructive" />
-                 </div>
-              )}
-              <Button variant="ghost" size="icon" onClick={() => setView('settings')}>
-                <Icons.settings className="h-5 w-5" />
-              </Button>
-              <Button variant="ghost" size="icon" onClick={lockVault}>
-                <Icons.lock className="h-5 w-5" />
-              </Button>
+    <div className="w-[400px] h-[600px] bg-background text-foreground overflow-hidden flex flex-col lotus-popup">
+      <AnimatePresence mode="wait">
+        {view === 'list' && (
+          <motion.div 
+            key="list"
+            className="flex flex-col h-full"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.2 }}
+          >
+            <div className="flex items-center justify-between p-4 glass border-b border-border/50">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/20">
+                  <Icons.lock className="h-4 w-4 text-primary-foreground" />
+                </div>
+                <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Lotus</h1>
+              </div>
+              <div className="flex gap-1">
+                {(syncStatus === 'error' || s3SyncStatus === 'error') && (
+                   <div className="flex items-center justify-center w-9 h-9" title={syncStatus === 'error' ? 'Local Sync Error' : 'S3 Sync Error'}>
+                      <Icons.cloud className="h-4 w-4 text-destructive" />
+                   </div>
+                )}
+                <Button variant="ghost" size="icon" onClick={() => setView('settings')} className="hover:bg-secondary/80">
+                  <Icons.settings className="h-5 w-5" />
+                </Button>
+                <Button variant="ghost" size="icon" onClick={lockVault} className="hover:bg-secondary/80">
+                  <Icons.lock className="h-5 w-5" />
+                </Button>
+              </div>
             </div>
-          </div>
-          <VaultList onSelectEntry={handleSelectEntry} onAddEntry={handleAddEntry} />
-        </>
-      )}
+            <VaultList onSelectEntry={handleSelectEntry} onAddEntry={handleAddEntry} />
+          </motion.div>
+        )}
 
-      {view === 'detail' && selectedEntry && (
-        <div className="flex flex-col h-full">
-          <Header title="Entry Details" onBack={() => setView('list')} />
-          <EntryDetail 
-            entry={selectedEntry} 
-            onEdit={handleEditEntry} 
-            onDelete={handleDeleteEntry} 
-          />
-        </div>
-      )}
+        {view === 'detail' && selectedEntry && (
+          <motion.div 
+            key="detail"
+            className="flex flex-col h-full"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ duration: 0.2 }}
+          >
+            <Header title="Entry Details" onBack={() => setView('list')} />
+            <EntryDetail 
+              entry={selectedEntry} 
+              onEdit={handleEditEntry} 
+              onDelete={handleDeleteEntry} 
+            />
+          </motion.div>
+        )}
 
-      {view === 'edit' && (
-        <div className="flex flex-col h-full">
-          <Header title={pendingSave ? 'Save Login' : (selectedEntry ? 'Edit Entry' : 'New Entry')} onBack={handleCancelEntry} />
-          <EntryForm 
-            initialEntry={selectedEntry} 
-            initialPassword={pendingSave && selectedEntry?.login?.urls[0] === pendingSave.url ? pendingSave.password : undefined}
-            onSave={handleSaveEntry} 
-            onCancel={handleCancelEntry} 
-          />
-        </div>
-      )}
+        {view === 'edit' && (
+          <motion.div 
+            key="edit"
+            className="flex flex-col h-full"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ duration: 0.2 }}
+          >
+            <Header title={pendingSave ? 'Save Login' : (selectedEntry ? 'Edit Entry' : 'New Entry')} onBack={handleCancelEntry} />
+            <EntryForm 
+              initialEntry={selectedEntry} 
+              initialPassword={pendingSave && selectedEntry?.login?.urls[0] === pendingSave.url ? pendingSave.password : undefined}
+              onSave={handleSaveEntry} 
+              onCancel={handleCancelEntry} 
+            />
+          </motion.div>
+        )}
 
-      {view === 'settings' && (
-        <div className="flex flex-col h-full">
-          <Header title="Settings" onBack={() => setView('list')} />
-          <Settings />
-        </div>
-      )}
+        {view === 'settings' && (
+          <motion.div 
+            key="settings"
+            className="flex flex-col h-full"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ duration: 0.2 }}
+          >
+            <Header title="Settings" onBack={() => setView('list')} />
+            <Settings />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

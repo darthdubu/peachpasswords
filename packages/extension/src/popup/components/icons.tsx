@@ -1,4 +1,4 @@
-import { Lock, Search, Plus, Settings, Copy, Eye, EyeOff, Trash2, LogOut, RefreshCw, Key, CreditCard, User, FileText, ChevronRight, Tag, Link, Download, Cloud } from "lucide-react"
+import { Lock, Search, Plus, Settings, Copy, Eye, EyeOff, Trash2, LogOut, RefreshCw, Key, CreditCard, User, FileText, ChevronRight, Tag, Link, Download, Cloud, LayoutGrid, Shield, Star } from "lucide-react"
 
 export const Icons = {
   lock: Lock,
@@ -19,5 +19,8 @@ export const Icons = {
   tag: Tag,
   link: Link,
   download: Download,
-  cloud: Cloud
+  cloud: Cloud,
+  layoutGrid: LayoutGrid,
+  shield: Shield,
+  star: Star
 }

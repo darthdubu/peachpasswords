@@ -79,7 +79,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 async function handleGetCredentials(url: string) {
   try {
-    const session = await chrome.storage.session.get('autofillKey')
+    const session = await chrome.storage.session.get(['autofillKey', 'autofillData'])
     if (!session.autofillKey) return { success: false, error: 'Vault locked' }
 
     const autofillKey = await crypto.subtle.importKey(
@@ -90,13 +90,12 @@ async function handleGetCredentials(url: string) {
       ['decrypt']
     )
 
-    const local = await chrome.storage.local.get('autofillData')
-    if (!local.autofillData) return { success: false, error: 'No autofill data' }
+    if (!session.autofillData) return { success: false, error: 'No autofill data' }
 
     const urlObj = new URL(url)
     const hostname = urlObj.hostname.toLowerCase()
 
-    for (const item of local.autofillData) {
+    for (const item of session.autofillData) {
       if (item.urls.some((u: string) => {
         try {
           return new URL(u).hostname.toLowerCase() === hostname
