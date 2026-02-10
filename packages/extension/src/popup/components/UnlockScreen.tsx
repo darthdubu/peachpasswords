@@ -65,10 +65,10 @@ function UnlockView({ onForgot }: { onForgot?: () => void }) {
   return (
     <motion.div {...fade} className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-4">
-        <img 
-          src="/icons/icon-32.png" 
-          alt="Lotus" 
-          className="w-7 h-7 rounded-lg shadow-md shadow-primary/20"
+        <img
+          src="/icons/icon-32.png"
+          alt="Lotus"
+          className="w-8 h-8 drop-shadow-md"
         />
         <span className="text-sm font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Lotus</span>
       </div>
@@ -77,12 +77,12 @@ function UnlockView({ onForgot }: { onForgot?: () => void }) {
         <p className="text-[11px] text-muted-foreground mb-2">Master password</p>
         <Input
           type="password"
-          placeholder="Enter password\u2026"
+          placeholder="Enter password…"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           disabled={isSubmitting}
           autoFocus
-          className="h-8 text-xs px-2.5 bg-secondary/50 border-border/60"
+          className="h-10 text-sm px-2.5 bg-secondary/50 border-border/60"
         />
 
         {error && (
@@ -92,7 +92,7 @@ function UnlockView({ onForgot }: { onForgot?: () => void }) {
         <Button
           type="submit"
           disabled={isSubmitting || !password}
-          className="h-8 text-xs mt-3 w-full glow-primary"
+          className="h-10 text-sm mt-3 w-full glow-primary"
         >
           {isSubmitting ? (
             <Icons.refresh className="h-3 w-3 animate-spin" />
@@ -143,10 +143,10 @@ function HomeView({ onNavigate }: { onNavigate: (v: View) => void }) {
   return (
     <motion.div {...fade} className="flex flex-col h-full">
       <div className="flex flex-col items-center mb-4">
-        <img 
-          src="/icons/icon-48.png" 
-          alt="Lotus" 
-          className="w-9 h-9 rounded-xl shadow-lg shadow-primary/25 mb-2"
+        <img
+          src="/icons/icon-48.png"
+          alt="Lotus"
+          className="w-10 h-10 drop-shadow-lg mb-2"
         />
         <span className="text-sm font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Lotus</span>
         <p className="text-[10px] text-muted-foreground mt-0.5">Get started</p>
@@ -216,12 +216,12 @@ function CreateView({ onBack }: { onBack: () => void }) {
           <p className="text-[10px] text-muted-foreground mb-1">Master password</p>
           <Input
             type="password"
-            placeholder="Choose a strong password\u2026"
+            placeholder="Choose a strong password…"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={isSubmitting}
             autoFocus
-            className="h-8 text-xs px-2.5 bg-secondary/50 border-border/60"
+            className="h-10 text-sm px-2.5 bg-secondary/50 border-border/60"
           />
         </div>
 
@@ -229,11 +229,11 @@ function CreateView({ onBack }: { onBack: () => void }) {
           <p className="text-[10px] text-muted-foreground mb-1">Confirm</p>
           <Input
             type="password"
-            placeholder="Repeat password\u2026"
+            placeholder="Repeat password…"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             disabled={isSubmitting}
-            className="h-8 text-xs px-2.5 bg-secondary/50 border-border/60"
+            className="h-10 text-sm px-2.5 bg-secondary/50 border-border/60"
           />
         </div>
 
@@ -269,7 +269,7 @@ function CreateView({ onBack }: { onBack: () => void }) {
           <Button
             type="submit"
             disabled={isSubmitting || !password || password !== confirmPassword || strength.score < 2}
-            className="h-8 text-xs w-full glow-primary"
+            className="h-10 text-sm w-full glow-primary"
           >
             {isSubmitting ? (
               <Icons.refresh className="h-3 w-3 animate-spin" />
@@ -307,7 +307,7 @@ function S3RestoreView({ onBack }: { onBack: () => void }) {
             placeholder="my-vault-backup"
             value={bucket}
             onChange={(e) => setBucket(e.target.value)}
-            className="h-7 text-[11px] px-2 bg-secondary/50 border-border/60"
+            className="h-9 text-xs px-2 bg-secondary/50 border-border/60"
           />
         </div>
 
@@ -317,17 +317,17 @@ function S3RestoreView({ onBack }: { onBack: () => void }) {
             placeholder="us-east-1"
             value={region}
             onChange={(e) => setRegion(e.target.value)}
-            className="h-7 text-[11px] px-2 bg-secondary/50 border-border/60"
+            className="h-9 text-xs px-2 bg-secondary/50 border-border/60"
           />
         </div>
 
         <div>
           <p className="text-[10px] text-muted-foreground mb-1">Access Key</p>
           <Input
-            placeholder="AKIA\u2026"
+            placeholder="AKIA…"
             value={accessKey}
             onChange={(e) => setAccessKey(e.target.value)}
-            className="h-7 text-[11px] px-2 bg-secondary/50 border-border/60"
+            className="h-9 text-xs px-2 bg-secondary/50 border-border/60"
           />
         </div>
 
@@ -338,14 +338,14 @@ function S3RestoreView({ onBack }: { onBack: () => void }) {
             placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
             value={secretKey}
             onChange={(e) => setSecretKey(e.target.value)}
-            className="h-7 text-[11px] px-2 bg-secondary/50 border-border/60"
+            className="h-9 text-xs px-2 bg-secondary/50 border-border/60"
           />
         </div>
 
         <div className="mt-auto">
           <Button
             disabled={!bucket || !region || !accessKey || !secretKey}
-            className="h-8 text-xs w-full"
+            className="h-10 text-sm w-full"
             onClick={() => {}}
           >
             <Icons.cloudDownload className="h-3 w-3 mr-1.5" />
@@ -388,7 +388,7 @@ function QrSyncView({ onBack }: { onBack: () => void }) {
 
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
           <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-pulse" />
-          {"Waiting for connection\u2026"}
+          {"Waiting for connection…"}
         </div>
       </div>
     </motion.div>
