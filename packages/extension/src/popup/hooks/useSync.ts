@@ -3,6 +3,15 @@ import { Vault } from '@lotus/shared'
 import { STORAGE_KEYS } from '../../lib/constants'
 import { bufferToBase64, base64ToBuffer, decrypt, deriveSubKey } from '../../lib/crypto-utils'
 
+// LOTUS-018: Generate nonce for replay protection
+function generateNonce(): string {
+  const timestamp = Date.now().toString(36)
+  const random = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+    .map(b => b.toString(36).padStart(2, '0'))
+    .join('')
+  return `${timestamp}-${random}`
+}
+
 export function useSync(
   vault: Vault | null, 
   masterKey: CryptoKey | null,
@@ -26,8 +35,12 @@ export function useSync(
     isSyncing.current = true
     try {
       // 1. Check server version
+      const nonce = generateNonce()
       const versionRes = await fetch(`${httpUrl}/api/vault/version`, {
-        headers: { 'X-Lotus-Secret': syncSecret }
+        headers: {
+          'X-Lotus-Secret': syncSecret,
+          'X-Request-Nonce': nonce
+        }
       })
       if (!versionRes.ok) throw new Error('Failed to fetch version')
       
@@ -35,7 +48,10 @@ export function useSync(
       
       if (serverVersion > vault.syncVersion) {
         const vaultRes = await fetch(`${httpUrl}/api/vault`, {
-           headers: { 'X-Lotus-Secret': syncSecret }
+           headers: {
+             'X-Lotus-Secret': syncSecret,
+             'X-Request-Nonce': generateNonce()
+           }
         })
         if (!vaultRes.ok) throw new Error('Failed to fetch vault')
         
@@ -56,14 +72,15 @@ export function useSync(
            const buffer = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
            const blob = bufferToBase64(buffer)
            
-           await fetch(`${httpUrl}/api/vault`, {
-              method: 'PUT',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Lotus-Secret': syncSecret
-              },
-              body: JSON.stringify({ blob, version: vault.syncVersion })
-            })
+            await fetch(`${httpUrl}/api/vault`, {
+               method: 'PUT',
+               headers: {
+                 'Content-Type': 'application/json',
+                 'X-Lotus-Secret': syncSecret,
+                 'X-Request-Nonce': generateNonce()
+               },
+               body: JSON.stringify({ blob, version: vault.syncVersion })
+             })
         }
       }
     } catch (e) {
@@ -107,7 +124,7 @@ export function useSync(
         const ws = new WebSocket(url)
         
         ws.onopen = () => {
-          ws.send(JSON.stringify({ type: 'auth', token: syncSecret }))
+          ws.send(JSON.stringify({ type: 'auth', token: syncSecret, nonce: generateNonce() }))
         }
 
         ws.onmessage = (event) => {

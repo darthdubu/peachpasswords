@@ -9,16 +9,47 @@ interface AuthHeader {
   signature: string;
 }
 
+// LOTUS-018: Nonce tracking for replay protection
+const seenNonces = new Map<string, number>();
+const NONCE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function isNonceValid(nonce: string | undefined): boolean {
+  if (!nonce) return false;
+  
+  const now = Date.now();
+  
+  // Clean expired nonces
+  for (const [storedNonce, timestamp] of seenNonces.entries()) {
+    if (now - timestamp > NONCE_TTL_MS) {
+      seenNonces.delete(storedNonce);
+    }
+  }
+  
+  // Check if nonce already used
+  if (seenNonces.has(nonce)) {
+    return false;
+  }
+  
+  // Store nonce
+  seenNonces.set(nonce, now);
+  return true;
+}
+
 export async function verifyHMAC(req: FastifyRequest, reply: FastifyReply) {
+  // LOTUS-018: Check nonce for replay protection
+  const nonce = req.headers['x-request-nonce'] as string | undefined;
+  if (!isNonceValid(nonce)) {
+    return reply.status(401).send({ error: "Invalid or replayed request" });
+  }
+
   // 1. Check for Simple Sync Secret (Effortless Mode)
   const secretHeader = req.headers['x-lotus-secret'];
   if (secretHeader) {
-    // SECURITY FIX (LOTUS-008): Use timing-safe comparison to prevent timing attacks
     const provided = Buffer.from(secretHeader as string);
     const expected = Buffer.from(CONFIG.SYNC_SECRET);
-    
+
     if (provided.length === expected.length && crypto.timingSafeEqual(provided, expected)) {
-      return; // Authenticated
+      return;
     }
   }
 
