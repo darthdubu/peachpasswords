@@ -1,45 +1,40 @@
-import { decrypt, base64ToBuffer, deriveSubKey } from '../lib/crypto-utils'
-import { Vault } from '@lotus/shared'
+import { decrypt, base64ToBuffer } from '../lib/crypto-utils'
 
 const LOCK_ALARM_NAME = 'lotus-auto-lock'
-const LOCK_DELAY_MS = 5 * 60 * 1000 // 5 minutes
+const LOCK_DELAY_MS = 5 * 60 * 1000
 
-// Background service worker initialized silently
+chrome.runtime.onInstalled.addListener(() => {})
 
-chrome.runtime.onInstalled.addListener(() => {
-  // Extension installed successfully
-})
-
-// LOTUS-014: Handle auto-lock alarm
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === LOCK_ALARM_NAME) {
-    // Clear all session data to lock the vault
-    chrome.storage.session.remove(['masterKey', 'pendingSave'])
+    chrome.storage.session.remove(['autofillKey', 'pendingSave'])
     chrome.action.setBadgeText({ text: '' })
   }
 })
 
-// Listen for messages to schedule or clear lock alarm
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'SCHEDULE_LOCK') {
-    // Schedule auto-lock alarm
     chrome.alarms.create(LOCK_ALARM_NAME, { delayInMinutes: LOCK_DELAY_MS / 60000 })
     sendResponse({ success: true })
     return true
   }
 
   if (message.type === 'CLEAR_LOCK') {
-    // Clear auto-lock alarm (user is active)
     chrome.alarms.clear(LOCK_ALARM_NAME)
     sendResponse({ success: true })
     return true
   }
 
   if (message.type === 'LOCK_NOW') {
-    // Immediate lock
-    chrome.storage.session.remove(['masterKey', 'pendingSave'])
+    chrome.storage.session.remove(['autofillKey', 'pendingSave'])
     chrome.action.setBadgeText({ text: '' })
     chrome.alarms.clear(LOCK_ALARM_NAME)
+    sendResponse({ success: true })
+    return true
+  }
+
+  if (message.type === 'STORE_AUTOFILL_KEY') {
+    chrome.storage.session.set({ autofillKey: message.key })
     sendResponse({ success: true })
     return true
   }
@@ -84,68 +79,50 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 async function handleGetCredentials(url: string) {
   try {
-    // 1. Get master key from session
-    const session = await chrome.storage.session.get('masterKey')
-    if (!session.masterKey) return { success: false, error: 'Vault locked' }
-    
-    const masterKey = await crypto.subtle.importKey(
+    const session = await chrome.storage.session.get('autofillKey')
+    if (!session.autofillKey) return { success: false, error: 'Vault locked' }
+
+    const autofillKey = await crypto.subtle.importKey(
       'jwk',
-      session.masterKey,
-      { name: 'HKDF' },
+      session.autofillKey,
+      { name: 'AES-GCM' },
       false,
-      ['deriveKey']
+      ['decrypt']
     )
 
-    // 2. Get vault
-    const local = await chrome.storage.local.get('vault')
-    if (!local.vault) return { success: false, error: 'No vault' }
+    const local = await chrome.storage.local.get('autofillData')
+    if (!local.autofillData) return { success: false, error: 'No autofill data' }
 
-    // 3. Decrypt vault
-    const encryptedVault = new Uint8Array(local.vault)
-    const vaultKey = await deriveSubKey(masterKey, 'vault-main', ['encrypt', 'decrypt'])
-    const decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
-    const vault: Vault = JSON.parse(new TextDecoder().decode(decryptedData))
-
-    // 4. Find matching entry
-    // SECURITY FIX (LOTUS-003): Use strict hostname equality - no substring matching
     const urlObj = new URL(url)
-    const hostname = urlObj.hostname
+    const hostname = urlObj.hostname.toLowerCase()
 
-    const entry = vault.entries.find(e => {
-      return e.login?.urls.some(u => {
+    for (const item of local.autofillData) {
+      if (item.urls.some((u: string) => {
         try {
-          const entryHostname = new URL(u).hostname.toLowerCase()
-          const pageHostname = hostname.toLowerCase()
-          // Strict hostname equality - prevents evil-bank.com matching bank.com
-          return entryHostname === pageHostname
-        } catch {
-          // Invalid URL stored - skip this entry
-          return false
+          return new URL(u).hostname.toLowerCase() === hostname
+        } catch { return false }
+      })) {
+        const iv = base64ToBuffer(item.iv)
+        const ciphertext = base64ToBuffer(item.ciphertext)
+        const combined = new Uint8Array(iv.byteLength + ciphertext.byteLength)
+        combined.set(new Uint8Array(iv), 0)
+        combined.set(new Uint8Array(ciphertext), iv.byteLength)
+
+        const decrypted = await decrypt(autofillKey, combined.buffer)
+        const data = JSON.parse(new TextDecoder().decode(decrypted))
+
+        return {
+          success: true,
+          credentials: {
+            username: data.username,
+            password: data.password
+          }
         }
-      })
-    })
-
-    if (!entry || !entry.login) return { success: false, error: 'No credentials found' }
-
-    // 5. Decrypt credentials
-    const entryKey = await deriveSubKey(masterKey, `entry-${entry.id}`, ['encrypt', 'decrypt'])
-    
-    let password = ''
-    if (entry.login.password) {
-      const buffer = base64ToBuffer(entry.login.password)
-      const decrypted = await decrypt(entryKey, buffer)
-      password = new TextDecoder().decode(decrypted)
-    }
-
-    return {
-      success: true,
-      credentials: {
-        username: entry.login.username,
-        password: password
       }
     }
+
+    return { success: false, error: 'No credentials found' }
   } catch (e) {
-    console.error('Handler error:', e)
-    throw e
+    return { success: false, error: 'Decryption failed' }
   }
 }

@@ -91,8 +91,8 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIdleTimer(null)
     // Clear sensitive data from memory
     // SECURITY FIX (LOTUS-001): Do NOT remove 'vault' - encrypted vault should persist
-    // Only remove the masterKey from session storage
-    chrome.storage.session.remove(['masterKey'])
+    // LOTUS-007: Remove autofillKey instead of masterKey
+    chrome.storage.session.remove(['autofillKey'])
     // LOTUS-014: Notify background to clear alarm
     await chrome.runtime.sendMessage({ type: 'LOCK_NOW' }).catch(() => {})
   }, [idleTimer])
@@ -135,10 +135,12 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setMasterKey(key)
       setIsUnlocked(true)
       setVaultExists(true)
-      
-      // Store key in session for background script (autofill)
-      const exportedKey = await crypto.subtle.exportKey('jwk', key)
-      await chrome.storage.session.set({ masterKey: exportedKey })
+
+      // LOTUS-007: Export derived autofill key instead of master key
+      // This key can only decrypt autofill data, not the full vault
+      const autofillKey = await deriveSubKey(key, 'autofill-only', ['encrypt', 'decrypt'])
+      const exportedAutofillKey = await crypto.subtle.exportKey('jwk', autofillKey)
+      await chrome.storage.session.set({ autofillKey: exportedAutofillKey })
       
       await saveVault(newVault, key)
       resetIdleTimer()
@@ -181,10 +183,11 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setVault(vaultData)
       setMasterKey(key)
       setIsUnlocked(true)
-      
-      // Store key in session for background script (autofill)
-      const exportedKey = await crypto.subtle.exportKey('jwk', key)
-      await chrome.storage.session.set({ masterKey: exportedKey })
+
+      // LOTUS-007: Export derived autofill key instead of master key
+      const autofillKey = await deriveSubKey(key, 'autofill-only', ['encrypt', 'decrypt'])
+      const exportedAutofillKey = await crypto.subtle.exportKey('jwk', autofillKey)
+      await chrome.storage.session.set({ autofillKey: exportedAutofillKey })
 
       resetIdleTimer()
       
