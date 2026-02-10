@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { Vault, VaultEntry } from '@lotus/shared'
-import { deriveKeyFromPassword, encrypt, decrypt, generateSalt, bufferToBase64, base64ToBuffer, deriveSubKey, encryptSettings, decryptSettings, EncryptedSettings } from '../../lib/crypto-utils'
+import { deriveKeyFromPassword, encrypt, decrypt, generateSalt, bufferToBase64, base64ToBuffer, deriveSubKey, encryptSettings, decryptSettings, EncryptedSettings, computeVaultHash, verifyVaultIntegrity } from '../../lib/crypto-utils'
 import { VAULT_IDLE_TIMEOUT } from '../../lib/constants'
 import { useSync } from '../hooks/useSync'
 import { useS3Sync } from '../hooks/useS3Sync'
@@ -52,17 +52,20 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [pendingSave, setPendingSave] = useState<{ url: string, username: string, password: string } | null>(null)
   
   const saveVault = async (vaultData: Vault, key: CryptoKey) => {
+    // LOTUS-005: Compute content hash before saving
+    const contentHash = await computeVaultHash(vaultData)
+    const vaultWithHash = { ...vaultData, contentHash }
+
     // Derive vault encryption key from master key
     const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
 
-    const vaultBytes = new TextEncoder().encode(JSON.stringify(vaultData))
-    // Use .buffer if the underlying buffer matches the view, otherwise slice it
-    const dataBuffer = vaultBytes.byteLength === vaultBytes.buffer.byteLength 
-      ? vaultBytes.buffer 
+    const vaultBytes = new TextEncoder().encode(JSON.stringify(vaultWithHash))
+    const dataBuffer = vaultBytes.byteLength === vaultBytes.buffer.byteLength
+      ? vaultBytes.buffer
       : vaultBytes.buffer.slice(vaultBytes.byteOffset, vaultBytes.byteOffset + vaultBytes.byteLength)
-      
+
     const encryptedVault = await encrypt(vaultKey, dataBuffer)
-    
+
     await chrome.storage.local.set({
       vault: Array.from(new Uint8Array(encryptedVault)),
       lastSync: vaultData.lastSync
@@ -166,7 +169,13 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const encryptedVault = new Uint8Array(result.vault)
       const decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
       const vaultData = JSON.parse(new TextDecoder().decode(decryptedData))
-      
+
+      // LOTUS-005: Verify vault integrity
+      const isValid = await verifyVaultIntegrity(vaultData)
+      if (!isValid) {
+        throw new Error('Vault integrity check failed - possible tampering detected')
+      }
+
       setVault(vaultData)
       setMasterKey(key)
       setIsUnlocked(true)

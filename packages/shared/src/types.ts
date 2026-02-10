@@ -70,4 +70,5 @@ export interface Vault {
   folders: { id: string; name: string; }[];
   lastSync: number;                    // Timestamp of last successful sync
   syncVersion: number;                 // Monotonically increasing, for conflict detection
+  contentHash?: string;                // LOTUS-005: SHA-256 hash of all entry IDs + version for integrity
 }

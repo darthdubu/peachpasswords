@@ -62,3 +62,18 @@ export async function decryptSettings(
     return null
   }
 }
+
+// LOTUS-005: Compute vault content hash for integrity verification
+export async function computeVaultHash(vault: { entries: { id: string }[]; syncVersion: number }): Promise<string> {
+  const data = vault.entries.map(e => e.id).sort().join('|') + ':' + vault.syncVersion
+  const encoder = new TextEncoder()
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(data))
+  return bufferToBase64(hashBuffer)
+}
+
+// LOTUS-005: Verify vault integrity
+export async function verifyVaultIntegrity(vault: { entries: { id: string }[]; syncVersion: number; contentHash?: string }): Promise<boolean> {
+  if (!vault.contentHash) return true
+  const computedHash = await computeVaultHash(vault)
+  return computedHash === vault.contentHash
+}
