@@ -95,15 +95,15 @@ export function VaultList({ onSelectEntry, onAddEntry }: VaultListProps) {
                 key={filter.label}
                 onClick={() => setSelectedType(isActive ? null : filter.type)}
                 className={`
-                  flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium
+                  flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium
                   transition-all duration-200 whitespace-nowrap
-                  ${isActive 
-                    ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25' 
+                  ${isActive
+                    ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25'
                     : 'bg-secondary/80 hover:bg-secondary text-secondary-foreground'
                   }
                 `}
               >
-                <Icon className="h-3 w-3" />
+                <Icon className="h-4 w-4" />
                 {filter.label}
               </button>
             )
