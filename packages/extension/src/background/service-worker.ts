@@ -6,7 +6,7 @@ chrome.runtime.onInstalled.addListener(() => {})
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === LOCK_ALARM_NAME) {
-    chrome.storage.session.remove(['autofillKey', 'pendingSave'])
+    chrome.storage.session.remove(['masterKey', 'autofillKey', 'pendingSave'])
     chrome.action.setBadgeText({ text: '' })
   }
 })

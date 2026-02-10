@@ -93,8 +93,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIdleTimer(null)
     // Clear sensitive data from memory
     // SECURITY FIX (LOTUS-001): Do NOT remove 'vault' - encrypted vault should persist
-    // LOTUS-007: Remove autofillKey and autofillData
-    chrome.storage.session.remove(['autofillKey', 'autofillData'])
+    chrome.storage.session.remove(['masterKey', 'autofillKey', 'autofillData'])
     // LOTUS-014: Notify background to clear alarm
     await chrome.runtime.sendMessage({ type: 'LOCK_NOW' }).catch(() => {})
   }, [idleTimer])
@@ -141,6 +140,9 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setMasterKey(key)
       setIsUnlocked(true)
       setVaultExists(true)
+
+      const exportedMasterKey = await crypto.subtle.exportKey('jwk', key)
+      await chrome.storage.session.set({ masterKey: exportedMasterKey })
 
       await exportAutofillData(newVault, key)
       
@@ -239,6 +241,10 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setVault(vaultData)
       setMasterKey(key)
       setIsUnlocked(true)
+
+      // Store masterKey in session for grace period restoration
+      const exportedMasterKey = await crypto.subtle.exportKey('jwk', key)
+      await chrome.storage.session.set({ masterKey: exportedMasterKey })
 
       // Export autofill data for background script
       await exportAutofillData(vaultData, key)
@@ -409,13 +415,67 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     })
   }, [])
 
-  // Initialize vault on mount
+  // Initialize vault on mount - check for existing session
   useEffect(() => {
-    // Check if vault exists
-    chrome.storage.local.get(['vault']).then(result => {
-      setVaultExists(!!result.vault)
+    const init = async () => {
+      const localResult = await chrome.storage.local.get(['vault'])
+      const hasVault = !!localResult.vault
+      setVaultExists(hasVault)
+      
+      const sessionResult = await chrome.storage.session.get(['masterKey', 'autofillKey'])
+      if (sessionResult.masterKey && sessionResult.autofillKey && hasVault) {
+        try {
+          const key = await crypto.subtle.importKey(
+            'jwk',
+            sessionResult.masterKey,
+            { name: 'HKDF' },
+            false,
+            ['deriveKey']
+          )
+          
+          const vaultResult = await chrome.storage.local.get(['vault'])
+          if (vaultResult.vault) {
+            const encryptedVault = new Uint8Array(vaultResult.vault)
+            const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
+            
+            let decryptedData
+            try {
+              decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
+            } catch {
+              const versionCombinations = [
+                'vault:1:0', 'vault:1:1', 'vault:1:2', 'vault:1:3', 'vault:1:4',
+                'vault:1:5', 'vault:1:6', 'vault:1:7', 'vault:1:8', 'vault:1:9', 'vault:1:10'
+              ]
+              for (const versionStr of versionCombinations) {
+                try {
+                  const aad = new TextEncoder().encode(versionStr).buffer as ArrayBuffer
+                  decryptedData = await decrypt(vaultKey, encryptedVault.buffer, aad)
+                  break
+                } catch {
+                  continue
+                }
+              }
+            }
+            
+            if (decryptedData) {
+              const vaultData = JSON.parse(new TextDecoder().decode(decryptedData))
+              if (await verifyVaultIntegrity(vaultData)) {
+                setVault(vaultData)
+                setMasterKey(key)
+                setIsUnlocked(true)
+                resetIdleTimer()
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Failed to restore session:', err)
+        }
+      }
+      
       setIsLoading(false)
-    })
+    }
+    
+    init()
   }, [])
 
   const value: VaultContextType = {
