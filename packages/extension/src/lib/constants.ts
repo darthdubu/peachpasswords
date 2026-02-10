@@ -1,6 +1,6 @@
 // Constants for Lotus extension
 
-export const VAULT_IDLE_TIMEOUT = 5 * 60 * 1000 // 5 minutes
+export const DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000 // 5 minutes default
 export const CLIPBOARD_CLEAR_TIMEOUT = 30 * 1000 // 30 seconds
 export const SYNC_INTERVAL = 60 * 1000 // 1 minute
 export const BACKUP_INTERVAL = 6 * 60 * 60 * 1000 // 6 hours

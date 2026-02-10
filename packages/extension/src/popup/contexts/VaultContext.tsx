@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { Vault, VaultEntry } from '@lotus/shared'
 import { deriveKeyFromPassword, encrypt, decrypt, generateSalt, bufferToBase64, base64ToBuffer, deriveSubKey, encryptSettings, decryptSettings, EncryptedSettings, computeVaultHash, verifyVaultIntegrity } from '../../lib/crypto-utils'
-import { VAULT_IDLE_TIMEOUT } from '../../lib/constants'
+import { STORAGE_KEYS } from '../../lib/constants'
 import { useSync } from '../hooks/useSync'
 import { useS3Sync } from '../hooks/useS3Sync'
 
@@ -100,17 +100,21 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [idleTimer])
 
   // Auto-lock functionality using chrome.alarms (LOTUS-014)
-  const resetIdleTimer = useCallback(() => {
-    // Clear any existing local timer
+  const resetIdleTimer = useCallback(async () => {
     if (idleTimer) clearTimeout(idleTimer)
 
-    // Schedule background alarm
-    chrome.runtime.sendMessage({ type: 'SCHEDULE_LOCK' }).catch(() => {})
+    const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS)
+    const idleTimeoutMinutes = result[STORAGE_KEYS.SETTINGS]?.idleTimeoutMinutes || 5
+    const idleTimeoutMs = idleTimeoutMinutes * 60 * 1000
 
-    // Also set a local timer as fallback for when popup is open
+    chrome.runtime.sendMessage({ 
+      type: 'SCHEDULE_LOCK', 
+      delayMs: idleTimeoutMs 
+    }).catch(() => {})
+
     const timer = setTimeout(() => {
       lockVault()
-    }, VAULT_IDLE_TIMEOUT)
+    }, idleTimeoutMs)
     setIdleTimer(timer)
   }, [idleTimer, lockVault])
 

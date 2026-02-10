@@ -105,7 +105,7 @@ function Main() {
   )
 
   return (
-    <div className="w-[400px] h-[600px] bg-background text-foreground overflow-hidden flex flex-col lotus-popup">
+    <div className="w-[340px] h-[520px] bg-background text-foreground overflow-hidden flex flex-col lotus-popup">
       <AnimatePresence mode="wait">
         {view === 'list' && (
           <motion.div 

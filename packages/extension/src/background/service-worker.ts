@@ -1,7 +1,6 @@
 import { decrypt, base64ToBuffer } from '../lib/crypto-utils'
 
 const LOCK_ALARM_NAME = 'lotus-auto-lock'
-const LOCK_DELAY_MS = 5 * 60 * 1000
 
 chrome.runtime.onInstalled.addListener(() => {})
 
@@ -14,7 +13,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'SCHEDULE_LOCK') {
-    chrome.alarms.create(LOCK_ALARM_NAME, { delayInMinutes: LOCK_DELAY_MS / 60000 })
+    const delayMs = message.delayMs || (5 * 60 * 1000)
+    chrome.alarms.create(LOCK_ALARM_NAME, { delayInMinutes: delayMs / 60000 })
     sendResponse({ success: true })
     return true
   }

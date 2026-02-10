@@ -25,6 +25,7 @@ export function Settings() {
   const [s3SecretKey, setS3SecretKey] = useState('')
   const [s3Bucket, setS3Bucket] = useState('')
   const [isUploading, setIsUploading] = useState(false)
+  const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState(5)
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -43,6 +44,7 @@ export function Settings() {
           setS3AccessKey(decrypted.s3AccessKey || '')
           setS3SecretKey(decrypted.s3SecretKey || '')
           setS3Bucket(decrypted.s3Bucket || '')
+          setIdleTimeoutMinutes(Number(decrypted.idleTimeoutMinutes) || 5)
         }
       } else {
         setServerUrl(settingsData.serverUrl || '')
@@ -52,6 +54,7 @@ export function Settings() {
         setS3AccessKey(settingsData.s3AccessKey || '')
         setS3SecretKey(settingsData.s3SecretKey || '')
         setS3Bucket(settingsData.s3Bucket || '')
+        setIdleTimeoutMinutes(settingsData.idleTimeoutMinutes || 5)
       }
     }
     loadSettings()
@@ -65,7 +68,8 @@ export function Settings() {
       s3Region,
       s3AccessKey,
       s3SecretKey,
-      s3Bucket
+      s3Bucket,
+      idleTimeoutMinutes: String(idleTimeoutMinutes)
     }
 
     const encrypted = await encryptSettingsData(settingsToEncrypt)
@@ -216,6 +220,32 @@ export function Settings() {
               </select>
             </div>
           </div>
+        </div>
+
+        <div className="space-y-4 pt-4 border-t">
+          <h3 className="font-medium">Security</h3>
+          
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <Label>Auto-Lock Grace Period</Label>
+              <span className="text-sm text-muted-foreground">{idleTimeoutMinutes} min</span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="60"
+              value={idleTimeoutMinutes}
+              onChange={(e) => setIdleTimeoutMinutes(Number(e.target.value))}
+              className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+            />
+            <p className="text-xs text-muted-foreground">
+              Time before vault automatically locks after closing the extension
+            </p>
+          </div>
+          
+          <Button onClick={handleSave} variant="outline" size="sm" className="w-full">
+            Save Security Settings
+          </Button>
         </div>
 
         {/* Server Config Section */}

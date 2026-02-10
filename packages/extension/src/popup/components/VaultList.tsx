@@ -66,44 +66,44 @@ export function VaultList({ onSelectEntry, onAddEntry }: VaultListProps) {
 
   return (
     <div className="flex flex-col h-full bg-background">
-      <div className="relative p-4 space-y-4 gradient-mesh">
-        <div className="flex items-center gap-3">
+      <div className="relative p-3 space-y-3 gradient-mesh">
+        <div className="flex items-center gap-2">
           <div className="relative flex-1">
-            <Icons.search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
+            <Icons.search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
             <Input
-              placeholder="Search your vault..."
+              placeholder="Search vault..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 pr-4 h-11 bg-background/80 backdrop-blur-sm border-border/50 focus:border-primary/50 transition-all"
+              className="pl-8 pr-3 h-9 text-sm bg-background/80 backdrop-blur-sm border-border/50 focus:border-primary/50 transition-all"
             />
           </div>
           <Button 
             size="icon" 
             onClick={onAddEntry}
-            className="h-11 w-11 glow-primary"
+            className="h-9 w-9 glow-primary"
           >
-            <Icons.plus className="h-5 w-5" />
+            <Icons.plus className="h-4 w-4" />
           </Button>
         </div>
         
-        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+        <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
           {typeFilters.map((filter) => {
             const Icon = filter.icon
             const isActive = selectedType === filter.type
             return (
-              <button
+               <button
                 key={filter.label}
                 onClick={() => setSelectedType(isActive ? null : filter.type)}
                 className={`
-                  flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium
+                  flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium
                   transition-all duration-200 whitespace-nowrap
                   ${isActive 
-                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25' 
+                    ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25' 
                     : 'bg-secondary/80 hover:bg-secondary text-secondary-foreground'
                   }
                 `}
               >
-                <Icon className="h-3.5 w-3.5" />
+                <Icon className="h-3 w-3" />
                 {filter.label}
               </button>
             )
@@ -111,59 +111,59 @@ export function VaultList({ onSelectEntry, onAddEntry }: VaultListProps) {
         </div>
       </div>
 
-      <ScrollArea className="flex-1 custom-scrollbar">
-        <div className="p-4 space-y-6">
+      <ScrollArea className="flex-1 scrollbar-hide">
+        <div className="p-3 space-y-4">
           {filteredEntries.length === 0 ? (
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex flex-col items-center justify-center py-12 text-center"
+              className="flex flex-col items-center justify-center py-8 text-center"
             >
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mb-4">
-                <Icons.shield className="h-10 w-10 text-primary/60" />
+              <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mb-3">
+                <Icons.shield className="h-7 w-7 text-primary/60" />
               </div>
-              <h3 className="text-lg font-semibold text-foreground mb-1">
+              <h3 className="text-sm font-semibold text-foreground mb-1">
                 {searchQuery ? 'No results found' : 'Your vault is empty'}
               </h3>
-              <p className="text-sm text-muted-foreground max-w-[200px]">
+              <p className="text-xs text-muted-foreground max-w-[180px]">
                 {searchQuery 
                   ? 'Try adjusting your search terms' 
                   : 'Add your first password to get started'
                 }
               </p>
               {!searchQuery && (
-                <Button onClick={onAddEntry} className="mt-4 gap-2">
-                  <Icons.plus className="h-4 w-4" />
+                <Button onClick={onAddEntry} className="mt-3 gap-1.5" size="sm">
+                  <Icons.plus className="h-3.5 w-3.5" />
                   Add your first entry
                 </Button>
               )}
             </motion.div>
           ) : (
             <>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="glass rounded-xl p-3 text-center">
-                  <div className="text-2xl font-bold text-primary">{entries.length}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total</div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="glass rounded-lg p-2 text-center">
+                  <div className="text-lg font-bold text-primary">{entries.length}</div>
+                  <div className="text-[8px] uppercase tracking-wider text-muted-foreground">Total</div>
                 </div>
-                <div className="glass rounded-xl p-3 text-center">
-                  <div className="text-2xl font-bold text-amber-500">{favorites.length}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Favorites</div>
+                <div className="glass rounded-lg p-2 text-center">
+                  <div className="text-lg font-bold text-amber-500">{favorites.length}</div>
+                  <div className="text-[8px] uppercase tracking-wider text-muted-foreground">Favorites</div>
                 </div>
-                <div className="glass rounded-xl p-3 text-center">
-                  <div className="text-2xl font-bold text-emerald-500">
+                <div className="glass rounded-lg p-2 text-center">
+                  <div className="text-lg font-bold text-emerald-500">
                     {entries.filter(e => e.login?.password).length}
                   </div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Passwords</div>
+                  <div className="text-[8px] uppercase tracking-wider text-muted-foreground">Passwords</div>
                 </div>
               </div>
 
               {favorites.length > 0 && !searchQuery && !selectedType && (
                 <div>
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
-                    <Icons.star className="h-3 w-3 text-amber-500" />
+                  <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Icons.star className="h-2.5 w-2.5 text-amber-500" />
                     Favorites
                   </h4>
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {favorites.slice(0, 3).map((entry, index) => (
                       <EntryCard
                         key={entry.id}
@@ -181,10 +181,10 @@ export function VaultList({ onSelectEntry, onAddEntry }: VaultListProps) {
               )}
 
               <div>
-                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+                <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">
                   {searchQuery ? 'Search Results' : selectedType ? `${selectedType.charAt(0).toUpperCase() + selectedType.slice(1)}s` : 'All Entries'}
                 </h4>
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <AnimatePresence mode="popLayout">
                     {filteredEntries.map((entry, index) => (
                       <EntryCard
@@ -231,42 +231,42 @@ function EntryCard({ entry, index, onClick, getIconForType, getTypeColor, getSub
       transition={{ delay: index * 0.03 }}
       onClick={onClick}
       className={`
-        group flex items-center p-3 rounded-xl cursor-pointer
+        group flex items-center p-2.5 rounded-lg cursor-pointer
         transition-all duration-200 ease-out
         glass hover:bg-white/[0.05] 
-        hover:shadow-lg hover:shadow-primary/10
-        hover:scale-[1.02] hover:-translate-y-0.5
+        hover:shadow-md hover:shadow-primary/10
+        hover:scale-[1.01]
         ${isFavorite ? 'border-amber-500/20' : ''}
       `}
     >
       <div className={`
-        h-11 w-11 rounded-xl flex items-center justify-center mr-3
-        transition-transform duration-200 group-hover:scale-110
+        h-9 w-9 rounded-lg flex items-center justify-center mr-2.5
+        transition-transform duration-200 group-hover:scale-105
         ${typeColor}
       `}>
-        <Icon className="h-5 w-5" />
+        <Icon className="h-4 w-4" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <h3 className="font-medium text-sm truncate text-foreground/90">{entry.name}</h3>
+        <div className="flex items-center gap-1.5">
+          <h3 className="font-medium text-xs truncate text-foreground/90">{entry.name}</h3>
           {entry.favorite && (
-            <Icons.star className="h-3 w-3 text-amber-500 fill-amber-500 flex-shrink-0" />
+            <Icons.star className="h-2.5 w-2.5 text-amber-500 fill-amber-500 flex-shrink-0" />
           )}
         </div>
-        <p className="text-xs text-muted-foreground truncate mt-0.5">
+        <p className="text-[10px] text-muted-foreground truncate mt-0">
           {getSubtitle(entry)}
         </p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {entry.tags.slice(0, 2).map(tag => (
           <span 
             key={tag} 
-            className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] rounded bg-secondary text-secondary-foreground"
+            className="hidden sm:inline-block px-1 py-0 text-[8px] rounded bg-secondary text-secondary-foreground"
           >
             {tag}
           </span>
         ))}
-        <Icons.chevronRight className="h-4 w-4 text-muted-foreground/50 transition-colors group-hover:text-primary" />
+        <Icons.chevronRight className="h-3.5 w-3.5 text-muted-foreground/50 transition-colors group-hover:text-primary" />
       </div>
     </motion.div>
   )

@@ -150,8 +150,8 @@ export function EntryForm({ initialEntry, initialPassword, onSave, onCancel }: E
   }
 
   return (
-    <div className="flex flex-col h-full bg-background p-4">
-      <form onSubmit={handleSubmit} className="space-y-4 flex-1 overflow-y-auto">
+    <div className="flex flex-col h-full bg-background p-4 overflow-hidden">
+      <form onSubmit={handleSubmit} className="space-y-4 flex-1 overflow-y-auto scrollbar-hide">
         
         <div className="space-y-2">
           <Label htmlFor="name">Name</Label>
