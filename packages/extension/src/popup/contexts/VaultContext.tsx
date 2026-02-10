@@ -202,18 +202,11 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const encryptedVault = new Uint8Array(result.vault)
       let decryptedData: ArrayBuffer
-      let needsMigration = false
 
       try {
         decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
-        needsMigration = true
-      } catch {
-        try {
-          const aad = new TextEncoder().encode('vault:1:0').buffer as ArrayBuffer
-          decryptedData = await decrypt(vaultKey, encryptedVault.buffer, aad)
-        } catch {
-          throw new Error('Failed to decrypt vault')
-        }
+      } catch (err) {
+        throw new Error(`Decryption failed: ${err instanceof Error ? err.message : 'unknown error'}`)
       }
 
       const vaultData = JSON.parse(new TextDecoder().decode(decryptedData))
@@ -221,10 +214,6 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const isValid = await verifyVaultIntegrity(vaultData)
       if (!isValid) {
         throw new Error('Vault integrity check failed - possible tampering detected')
-      }
-
-      if (needsMigration) {
-        await saveVault(vaultData, key)
       }
 
       setVault(vaultData)
@@ -238,7 +227,9 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       
       return true
     } catch (err) {
-      setError('Invalid password')
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+      console.error('Unlock error:', errorMsg)
+      setError(`Failed to unlock: ${errorMsg}`)
       return false
     } finally {
            setIsLoading(false)
