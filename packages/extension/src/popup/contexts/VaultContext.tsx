@@ -205,12 +205,12 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       let needsMigration = false
 
       try {
-        const aad = new TextEncoder().encode(`vault:${result.vault.version || 1}:${result.vault.syncVersion || 0}`).buffer as ArrayBuffer
-        decryptedData = await decrypt(vaultKey, encryptedVault.buffer, aad)
+        decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
+        needsMigration = true
       } catch {
         try {
-          decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
-          needsMigration = true
+          const aad = new TextEncoder().encode('vault:1:0').buffer as ArrayBuffer
+          decryptedData = await decrypt(vaultKey, encryptedVault.buffer, aad)
         } catch {
           throw new Error('Failed to decrypt vault')
         }

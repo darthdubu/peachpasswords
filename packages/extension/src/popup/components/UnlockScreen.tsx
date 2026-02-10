@@ -91,8 +91,8 @@ export function UnlockScreen() {
   }
 
   return (
-    <div className="flex h-full items-center justify-center p-4 bg-background">
-      <Card className="w-full max-w-sm border-none shadow-none bg-transparent">
+    <div className="w-[400px] h-[600px] flex items-center justify-center p-4 bg-background">
+      <Card className="w-full border-none shadow-none bg-transparent">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
             <Icons.lock className="h-6 w-6 text-primary" />
