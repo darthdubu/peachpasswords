@@ -1,5 +1,5 @@
 // Content script for WebAuthn/passkey interception
-console.log('Lotus passkey content script loaded')
+console.log('Peach passkey content script loaded')
 
 // Store original WebAuthn functions
 const originalCreate = navigator.credentials.create
@@ -18,14 +18,14 @@ navigator.credentials.create = async (options?: CredentialCreationOptions): Prom
       })
       
       if (response?.credential) {
-        console.log('Using Lotus passkey')
+        console.log('Using Peach passkey')
         return response.credential
       }
     } catch (error) {
-      console.error('Failed to create passkey with Lotus:', error)
+      console.error('Failed to create passkey with Peach:', error)
     }
   }
-  
+
   // Fallback to original implementation
   return originalCreate.call(navigator.credentials, options)
 }
@@ -34,25 +34,25 @@ navigator.credentials.create = async (options?: CredentialCreationOptions): Prom
 navigator.credentials.get = async (options?: CredentialRequestOptions): Promise<Credential | null> => {
   if (options?.publicKey) {
     console.log('Intercepting WebAuthn credential retrieval')
-    
+
     try {
       // Send request to extension background script
       const response = await chrome.runtime.sendMessage({
         type: 'PASSKEY_GET',
         options: options
       })
-      
+
       if (response?.credential) {
-        console.log('Using Lotus passkey')
+        console.log('Using Peach passkey')
         return response.credential
       }
     } catch (error) {
-      console.error('Failed to get passkey with Lotus:', error)
+      console.error('Failed to get passkey with Peach:', error)
     }
   }
-  
+
   // Fallback to original implementation
   return originalGet.call(navigator.credentials, options)
 }
 
-console.log('WebAuthn functions intercepted by Lotus')
+console.log('WebAuthn functions intercepted by Peach')

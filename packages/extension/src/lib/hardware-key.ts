@@ -14,13 +14,13 @@ export async function registerHardwareKey(): Promise<HardwareKeyCredential | nul
       publicKey: {
         challenge,
         rp: {
-          name: 'Lotus Password Manager',
+          name: 'Peach Password Manager',
           id: window.location.hostname,
         },
         user: {
           id: crypto.getRandomValues(new Uint8Array(16)),
-          name: 'lotus-user',
-          displayName: 'Lotus User',
+          name: 'peach-user',
+          displayName: 'Peach User',
         },
         pubKeyCredParams: [
           { type: 'public-key', alg: -7 },

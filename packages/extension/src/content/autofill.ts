@@ -55,7 +55,7 @@ function findUsernameInput(container: Element, passwordInput: HTMLInputElement):
 
 function addIconToInput(input: HTMLInputElement, type: 'username' | 'password') {
   const icon = createIcon('L', '#10b981') // Green for login
-  icon.title = 'Click to fill with Lotus'
+  icon.title = 'Click to fill with Peach'
   
   setupIconContainer(input, icon)
   

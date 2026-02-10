@@ -82,7 +82,7 @@ Value: ${share.value}
 RECOVERY INSTRUCTIONS:
 ----------------------
 1. Collect at least ${kit.threshold} shares
-2. Go to Lotus Settings > Recovery
+2. Go to Peach Settings > Recovery
 3. Enter all share values
 4. Your vault will be unlocked
 
@@ -94,7 +94,7 @@ your data cannot be recovered.
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `lotus-recovery-kit-${Date.now()}.txt`
+  a.download = `peach-recovery-kit-${Date.now()}.txt`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)

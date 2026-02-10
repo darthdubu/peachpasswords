@@ -117,12 +117,14 @@ function Main() {
             transition={{ duration: 0.2 }}
           >
             <div className="flex items-center justify-between p-4 glass border-b border-border/50">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/20">
-                  <Icons.lock className="h-4 w-4 text-primary-foreground" />
-                </div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Lotus</h1>
-              </div>
+<div className="flex items-center gap-2">
+              <img 
+                src="/icons/icon-32.png" 
+                alt="Peach" 
+                className="w-8 h-8 drop-shadow-lg"
+              />
+              <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Peach</h1>
+            </div>
               <div className="flex gap-1">
                 {(syncStatus === 'error' || s3SyncStatus === 'error') && (
                    <div className="flex items-center justify-center w-9 h-9" title={syncStatus === 'error' ? 'Local Sync Error' : 'S3 Sync Error'}>

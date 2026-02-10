@@ -260,7 +260,7 @@ export function Settings() {
               placeholder="ws://localhost:8743"
             />
             <p className="text-xs text-muted-foreground">
-              URL of your local Lotus server (e.g. ws://localhost:8743)
+              URL of your local Peach server (e.g. ws://localhost:8743)
             </p>
           </div>
 
@@ -386,7 +386,7 @@ export function Settings() {
                 />
               </div>
               <p className="text-xs text-center text-muted-foreground mt-2">
-                Scan with Lotus Android app to pair. <br/>
+                Scan with Peach Android app to pair. <br/>
                 Ensure your phone can reach the Server URL (use LAN IP instead of localhost).
               </p>
             </div>

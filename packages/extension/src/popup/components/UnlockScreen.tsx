@@ -67,10 +67,10 @@ function UnlockView({ onForgot }: { onForgot?: () => void }) {
       <div className="flex items-center gap-2 mb-4">
         <img
           src="/icons/icon-32.png"
-          alt="Lotus"
+          alt="Peach"
           className="w-8 h-8 drop-shadow-md"
         />
-        <span className="text-sm font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Lotus</span>
+        <span className="text-sm font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Peach</span>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col flex-1">
@@ -145,10 +145,10 @@ function HomeView({ onNavigate }: { onNavigate: (v: View) => void }) {
       <div className="flex flex-col items-center mb-4">
         <img
           src="/icons/icon-48.png"
-          alt="Lotus"
+          alt="Peach"
           className="w-10 h-10 drop-shadow-lg mb-2"
         />
-        <span className="text-sm font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Lotus</span>
+        <span className="text-sm font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Peach</span>
         <p className="text-[10px] text-muted-foreground mt-0.5">Get started</p>
       </div>
 
@@ -380,7 +380,7 @@ function QrSyncView({ onBack }: { onBack: () => void }) {
         </div>
 
         <div className="text-center">
-          <p className="text-[11px] font-medium text-foreground">Scan with Lotus Mobile</p>
+          <p className="text-[11px] font-medium text-foreground">Scan with Peach Mobile</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">
             {"Open the app \u2192 Settings \u2192 Sync \u2192 Scan Code"}
           </p>

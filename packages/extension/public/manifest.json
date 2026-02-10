@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Lotus",
+  "name": "Peach",
   "version": "1.0.1",
   "description": "Private, zero-knowledge password manager with LAN sync",
   "permissions": [
