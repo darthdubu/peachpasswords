@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { Vault, VaultEntry } from '@lotus/shared'
-import { deriveKeyFromPassword, encrypt, decrypt, generateSalt, bufferToBase64, base64ToBuffer, deriveSubKey, encryptSettings, decryptSettings, EncryptedSettings, computeVaultHash, verifyVaultIntegrity } from '../../lib/crypto-utils'
+import { deriveKeyFromPasswordWithRaw, encrypt, decrypt, generateSalt, bufferToBase64, base64ToBuffer, deriveSubKey, encryptSettings, decryptSettings, EncryptedSettings, computeVaultHash, verifyVaultIntegrity } from '../../lib/crypto-utils'
+import { authenticateWithBiometric } from '../../lib/biometric'
 import { STORAGE_KEYS } from '../../lib/constants'
 import { useSync } from '../hooks/useSync'
 import { useS3Sync } from '../hooks/useS3Sync'
@@ -10,6 +11,7 @@ interface VaultContextType {
   isUnlocked: boolean
   masterKey: CryptoKey | null
   unlockVault: (password: string) => Promise<boolean>
+  unlockWithBiometric: () => Promise<boolean>
   lockVault: () => void
   createVault: (password: string) => Promise<void>
   addEntry: (entry: VaultEntry) => Promise<void>
@@ -93,7 +95,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIdleTimer(null)
     // Clear sensitive data from memory
     // SECURITY FIX (LOTUS-001): Do NOT remove 'vault' - encrypted vault should persist
-    chrome.storage.session.remove(['masterKey', 'autofillKey', 'autofillData'])
+    chrome.storage.session.remove(['masterKey', 'masterKeyRaw', 'autofillKey', 'autofillData'])
     // LOTUS-014: Notify background to clear alarm
     await chrome.runtime.sendMessage({ type: 'LOCK_NOW' }).catch(() => {})
   }, [idleTimer])
@@ -123,7 +125,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIsLoading(true)
     try {
       const salt = await generateSalt()
-      const key = await deriveKeyFromPassword(password, salt)
+      const { key, rawBytes } = await deriveKeyFromPasswordWithRaw(password, salt)
       
       const newVault: Vault = {
         version: 1,
@@ -141,8 +143,8 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setIsUnlocked(true)
       setVaultExists(true)
 
-      const exportedMasterKey = await crypto.subtle.exportKey('jwk', key)
-      await chrome.storage.session.set({ masterKey: exportedMasterKey })
+      // Store raw key bytes in session storage (NOT the HKDF key which can't be exported)
+      await chrome.storage.session.set({ masterKeyRaw: Array.from(rawBytes) })
 
       await exportAutofillData(newVault, key)
       
@@ -193,7 +195,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const unlockVault = useCallback(async (password: string): Promise<boolean> => {
     setIsLoading(true)
     setError(null)
-    
+
     try {
       // Get stored vault data
       const result = await chrome.storage.local.get(['vault', 'salt'])
@@ -202,8 +204,8 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
 
       const salt = new Uint8Array(result.salt)
-      const key = await deriveKeyFromPassword(password, salt)
-      
+      const { key, rawBytes } = await deriveKeyFromPasswordWithRaw(password, salt)
+
       const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
 
       const encryptedVault = new Uint8Array(result.vault)
@@ -213,7 +215,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
       } catch {
         const versionCombinations = [
-          'vault:1:0', 'vault:1:1', 'vault:1:2', 'vault:1:3', 'vault:1:4', 
+          'vault:1:0', 'vault:1:1', 'vault:1:2', 'vault:1:3', 'vault:1:4',
           'vault:1:5', 'vault:1:6', 'vault:1:7', 'vault:1:8', 'vault:1:9', 'vault:1:10'
         ]
         for (const versionStr of versionCombinations) {
@@ -242,15 +244,14 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setMasterKey(key)
       setIsUnlocked(true)
 
-      // Store masterKey in session for grace period restoration
-      const exportedMasterKey = await crypto.subtle.exportKey('jwk', key)
-      await chrome.storage.session.set({ masterKey: exportedMasterKey })
+      // Store raw key bytes in session storage for grace period restoration
+      await chrome.storage.session.set({ masterKeyRaw: Array.from(rawBytes) })
 
       // Export autofill data for background script
       await exportAutofillData(vaultData, key)
 
       resetIdleTimer()
-      
+
       return true
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error'
@@ -259,6 +260,74 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return false
     } finally {
            setIsLoading(false)
+    }
+  }, [resetIdleTimer])
+
+  const unlockWithBiometric = useCallback(async (): Promise<boolean> => {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const result = await chrome.storage.local.get(['vault'])
+      if (!result.vault) {
+        throw new Error('No vault found')
+      }
+
+      const key = await authenticateWithBiometric()
+      if (!key) {
+        throw new Error('Biometric authentication failed')
+      }
+
+      const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
+      const encryptedVault = new Uint8Array(result.vault)
+      let decryptedData: ArrayBuffer | undefined
+
+      try {
+        decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
+      } catch {
+        const versionCombinations = [
+          'vault:1:0', 'vault:1:1', 'vault:1:2', 'vault:1:3', 'vault:1:4',
+          'vault:1:5', 'vault:1:6', 'vault:1:7', 'vault:1:8', 'vault:1:9', 'vault:1:10'
+        ]
+        for (const versionStr of versionCombinations) {
+          try {
+            const aad = new TextEncoder().encode(versionStr).buffer as ArrayBuffer
+            decryptedData = await decrypt(vaultKey, encryptedVault.buffer, aad)
+            break
+          } catch {
+            continue
+          }
+        }
+      }
+
+      if (!decryptedData) {
+        throw new Error('Unable to decrypt vault with biometric')
+      }
+
+      const vaultData = JSON.parse(new TextDecoder().decode(decryptedData))
+
+      const isValid = await verifyVaultIntegrity(vaultData)
+      if (!isValid) {
+        throw new Error('Vault integrity check failed')
+      }
+
+      setVault(vaultData)
+      setMasterKey(key)
+      setIsUnlocked(true)
+
+      // Note: For biometric auth, we cannot easily get the raw bytes
+      // The biometric credential stores the encrypted raw bytes internally
+      await exportAutofillData(vaultData, key)
+      resetIdleTimer()
+
+      return true
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+      console.error('Biometric unlock error:', errorMsg)
+      setError(`Biometric unlock failed: ${errorMsg}`)
+      return false
+    } finally {
+      setIsLoading(false)
     }
   }, [resetIdleTimer])
 
@@ -422,12 +491,13 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const hasVault = !!localResult.vault
       setVaultExists(hasVault)
       
-      const sessionResult = await chrome.storage.session.get(['masterKey', 'autofillKey'])
-      if (sessionResult.masterKey && sessionResult.autofillKey && hasVault) {
+      const sessionResult = await chrome.storage.session.get(['masterKeyRaw', 'autofillKey'])
+      if (sessionResult.masterKeyRaw && sessionResult.autofillKey && hasVault) {
         try {
+          const rawBytes = new Uint8Array(sessionResult.masterKeyRaw)
           const key = await crypto.subtle.importKey(
-            'jwk',
-            sessionResult.masterKey,
+            'raw',
+            rawBytes,
             { name: 'HKDF' },
             false,
             ['deriveKey']
@@ -483,6 +553,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     isUnlocked,
     masterKey,
     unlockVault,
+    unlockWithBiometric,
     lockVault,
     createVault,
     addEntry,

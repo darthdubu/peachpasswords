@@ -1,11 +1,24 @@
 // Core crypto operations using Web Crypto API
 import { argon2id } from 'hash-wasm';
 
+export interface DerivedKeyResult {
+  key: CryptoKey;
+  rawBytes: Uint8Array;
+}
+
 export async function deriveKeyFromPassword(
   password: string,
   salt: Uint8Array
 ): Promise<CryptoKey> {
-  // 2. Run Argon2id (via WASM)
+  const result = await deriveKeyFromPasswordWithRaw(password, salt);
+  return result.key;
+}
+
+export async function deriveKeyFromPasswordWithRaw(
+  password: string,
+  salt: Uint8Array
+): Promise<DerivedKeyResult> {
+  // Run Argon2id (via WASM)
   const hash = await argon2id({
     password,
     salt,
@@ -16,14 +29,19 @@ export async function deriveKeyFromPassword(
     outputType: 'binary'
   });
 
-  // 3. Import as CryptoKey
-  return crypto.subtle.importKey(
+  // Keep a copy of the raw bytes before importing
+  const rawBytes = new Uint8Array(hash as Uint8Array);
+
+  // Import as CryptoKey
+  const key = await crypto.subtle.importKey(
     "raw",
-    hash as any,
+    rawBytes,
     { name: "HKDF" },
     false,
     ["deriveKey"]
   );
+
+  return { key, rawBytes };
 }
 
 export async function deriveSubKey(

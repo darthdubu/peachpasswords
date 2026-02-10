@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useVault } from '../contexts/VaultContext'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Icons } from './icons'
+import QRCode from 'react-qr-code'
 
 type View = 'home' | 'create' | 'unlock' | 's3-restore' | 'qr-sync'
 
@@ -357,39 +358,155 @@ function S3RestoreView({ onBack }: { onBack: () => void }) {
   )
 }
 
-function QrSyncView({ onBack }: { onBack: () => void }) {
-  const filledCells = new Set([0, 1, 2, 5, 6, 7, 10, 11, 12, 3, 9, 16, 18, 21, 23, 24])
+function QrSyncView({ onBack, onConfigured }: { onBack: () => void; onConfigured?: () => void }) {
+  const [existingSettings, setExistingSettings] = useState<{serverUrl: string; syncSecret: string} | null>(null)
+  const [pairingToken, setPairingToken] = useState<string | null>(null)
+  const [pairingQR, setPairingQR] = useState<string | null>(null)
+  const [isPolling, setIsPolling] = useState(false)
+  const [isConfigured, setIsConfigured] = useState(false)
+
+  useEffect(() => {
+    const loadExistingSettings = async () => {
+      const result = await chrome.storage.local.get(['peach_settings'])
+      if (result.peach_settings) {
+        const settings = result.peach_settings
+        if (settings.serverUrl && settings.syncSecret) {
+          setExistingSettings({
+            serverUrl: settings.serverUrl,
+            syncSecret: settings.syncSecret
+          })
+        }
+      }
+    }
+    loadExistingSettings()
+  }, [])
+
+  const startPairing = async () => {
+    const { createPairingSession, generatePairingQRValue } = await import('../../lib/pairing')
+    const session = await createPairingSession()
+    setPairingToken(session.token)
+    const serverUrl = existingSettings?.serverUrl
+    setPairingQR(generatePairingQRValue(session.token, serverUrl))
+    setIsPolling(true)
+  }
+
+  useEffect(() => {
+    if (!isPolling || !pairingToken) return
+
+    const pollInterval = setInterval(async () => {
+      const { pollForPairingCompletion } = await import('../../lib/pairing')
+      const serverUrl = existingSettings?.serverUrl
+      const data = await pollForPairingCompletion(pairingToken, serverUrl)
+      
+      if (data) {
+        await chrome.storage.local.set({
+          peach_settings: {
+            serverUrl: data.serverUrl,
+            syncSecret: data.syncSecret
+          }
+        })
+        setIsConfigured(true)
+        setIsPolling(false)
+        onConfigured?.()
+      }
+    }, 2000)
+
+    const timeout = setTimeout(() => {
+      setIsPolling(false)
+      clearInterval(pollInterval)
+    }, 5 * 60 * 1000)
+
+    return () => {
+      clearInterval(pollInterval)
+      clearTimeout(timeout)
+    }
+  }, [isPolling, pairingToken, onConfigured])
+
+  const useExistingSettings = async () => {
+    if (existingSettings) {
+      onConfigured?.()
+    }
+  }
 
   return (
     <motion.div {...fade} className="flex flex-col h-full">
       <ViewHeader title="Sync from phone" onBack={onBack} />
 
-      <div className="flex flex-col items-center flex-1 justify-center gap-3">
-        <div className="relative">
-          <div className="w-32 h-32 rounded-xl border-2 border-dashed border-border/60 bg-secondary/30 flex items-center justify-center">
-            <div className="grid grid-cols-5 grid-rows-5 gap-[3px] w-20 h-20">
-              {Array.from({ length: 25 }).map((_, i) => (
-                <div
-                  key={i}
-                  className={`rounded-[2px] ${filledCells.has(i) ? 'bg-foreground/80' : 'bg-foreground/10'}`}
+      <div className="flex flex-col flex-1 gap-4 pt-2">
+        {isConfigured ? (
+          <div className="flex flex-col items-center justify-center flex-1 gap-4">
+            <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
+              <Icons.check className="h-8 w-8 text-green-500" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-foreground">Configuration Received!</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Your vault is now synced with your phone
+              </p>
+            </div>
+            <Button onClick={onBack} className="w-full">
+              Continue
+            </Button>
+          </div>
+        ) : pairingQR ? (
+          <div className="flex flex-col items-center gap-4">
+            <div className="relative">
+              <div className="p-3 bg-white rounded-xl border-2 border-dashed border-border/60">
+                <QRCode 
+                  value={pairingQR}
+                  size={160}
+                  bgColor="#ffffff"
+                  fgColor="#000000"
                 />
-              ))}
+              </div>
+              <div className="absolute inset-0 rounded-xl border-2 border-primary/40 pulse-glow pointer-events-none" />
+            </div>
+
+            <div className="text-center space-y-1">
+              <p className="text-[11px] font-medium text-foreground">Scan with Peach Mobile</p>
+              <p className="text-[10px] text-muted-foreground">
+                Open the app and scan to share configuration
+              </p>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-pulse" />
+              Waiting for phone to connect&hellip;
             </div>
           </div>
-          <div className="absolute inset-0 rounded-xl border-2 border-primary/40 pulse-glow" />
-        </div>
+        ) : (
+          <div className="space-y-4">
+            {existingSettings && (
+              <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
+                <p className="text-xs font-medium text-foreground mb-1">Existing Configuration Found</p>
+                <p className="text-[10px] text-muted-foreground mb-2">
+                  Server: {existingSettings.serverUrl}
+                </p>
+                <Button 
+                  onClick={useExistingSettings}
+                  variant="outline" 
+                  size="sm"
+                  className="w-full text-xs"
+                >
+                  Use Existing Settings
+                </Button>
+              </div>
+            )}
 
-        <div className="text-center">
-          <p className="text-[11px] font-medium text-foreground">Scan with Peach Mobile</p>
-          <p className="text-[10px] text-muted-foreground mt-0.5">
-            {"Open the app \u2192 Settings \u2192 Sync \u2192 Scan Code"}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
-          <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-pulse" />
-          {"Waiting for connection…"}
-        </div>
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Don&apos;t have settings configured? Generate a pairing code to receive configuration from your phone.
+              </p>
+              <Button 
+                onClick={startPairing}
+                className="w-full"
+              >
+                <Icons.qrCode className="h-4 w-4 mr-2" />
+                Generate Pairing Code
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </motion.div>
   )
@@ -433,6 +550,7 @@ export function UnlockScreen() {
             <QrSyncView
               key="qr-sync"
               onBack={() => setView('home')}
+              onConfigured={() => setView('home')}
             />
           )}
         </AnimatePresence>

@@ -1,7 +1,7 @@
 // Crypto utilities wrapper
-import { deriveKeyFromPassword, encrypt, decrypt, deriveSubKey } from './crypto'
+import { deriveKeyFromPassword, deriveKeyFromPasswordWithRaw, encrypt, decrypt, deriveSubKey } from './crypto'
 
-export { deriveKeyFromPassword, encrypt, decrypt, deriveSubKey }
+export { deriveKeyFromPassword, deriveKeyFromPasswordWithRaw, encrypt, decrypt, deriveSubKey }
 
 export async function generateSalt(): Promise<Uint8Array> {
   return crypto.getRandomValues(new Uint8Array(32))

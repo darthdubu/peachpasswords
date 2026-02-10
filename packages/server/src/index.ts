@@ -7,6 +7,7 @@ import path from "path";
 import { vaultRoutes } from "./routes/vault";
 import { syncRoutes } from "./routes/sync";
 import { healthRoutes } from "./routes/health";
+import { pairingRoutes } from "./routes/pairing";
 import { CONFIG } from "./lib/config";
 
 // SECURITY FIX (LOTUS-002): TLS is mandatory - refuse to start without valid certificates
@@ -78,6 +79,7 @@ app.register(rateLimit, {
 app.register(websocket);
 app.register(vaultRoutes, { prefix: "/api" });
 app.register(syncRoutes, { prefix: "/api" });
+app.register(pairingRoutes, { prefix: "/api" });
 app.register(healthRoutes);
 
 app.listen({ port: CONFIG.PORT, host: "0.0.0.0" }, (err, address) => {
