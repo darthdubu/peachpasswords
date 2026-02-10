@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Default Dark Mode Base */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 95%;
+    --card: 240 6% 6%;
+    --card-foreground: 0 0% 95%;
+    --popover: 240 6% 6%;
+    --popover-foreground: 0 0% 95%;
+    --secondary: 240 5% 12%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 240 5% 15%;
+    --muted-foreground: 240 5% 55%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 95%;
+    --border: 240 6% 14%;
+    --input: 240 6% 14%;
+    --radius: 0.625rem;
+    
+    /* Default Color: Peach */
+    --primary: 15 90% 65%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 15 90% 65%;
+    --accent-foreground: 0 0% 100%;
+    --ring: 15 90% 65%;
+  }
+
+  .light {
+    --background: 20 50% 98%;
+    --foreground: 20 10% 20%;
+    --card: 0 0% 100%;
+    --card-foreground: 20 10% 20%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 10% 20%;
+    --secondary: 20 20% 96%;
+    --secondary-foreground: 20 10% 20%;
+    --muted: 20 20% 96%;
+    --muted-foreground: 20 10% 40%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 20 20% 90%;
+    --input: 20 20% 90%;
+  }
+  
+  /* Color Themes */
+  .theme-green {
+    --primary: 142 71% 45%;
+    --primary-foreground: 144 80% 10%;
+    --accent: 142 71% 45%;
+    --accent-foreground: 0 0% 95%;
+    --ring: 142 71% 45%;
+  }
+
+  .theme-blue {
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+    --ring: 217 91% 60%;
+  }
+  
+  .theme-peach {
+    --primary: 15 90% 65%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 15 90% 65%;
+    --accent-foreground: 0 0% 100%;
+    --ring: 15 90% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Geist Sans", sans-serif;
+  }
+}
+
+/* Extension popup specific styles */
+.lotus-popup {
+  width: 380px;
+  height: 560px;
+  overflow: hidden;
+}
+
+/* Autofill icon styles */
+.lotus-autofill-icon {
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.lotus-autofill-icon:hover {
+  opacity: 0.8;
+}

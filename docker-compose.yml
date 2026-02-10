@@ -1,0 +1,22 @@
+version: '3.8'
+services:
+  lotus-server:
+    build: .
+    container_name: lotus-server
+    restart: unless-stopped
+    ports:
+      - "8743:8743"
+    volumes:
+      - ./data:/app/data
+      - ./certs:/app/certs
+    environment:
+      - VAULTKEY_DATA=/app/data
+      - VAULTKEY_CERTS=/app/certs
+      - VAULTKEY_PORT=8743
+      # SECURITY FIX (LOTUS-002): Sync secret MUST be set explicitly
+      # Generate one with: openssl rand -base64 32
+      # If not set, a random secret will be generated on each restart (breaks sync!)
+      - VAULTKEY_SYNC_SECRET=${VAULTKEY_SYNC_SECRET:?Error: VAULTKEY_SYNC_SECRET must be set. Generate one with: openssl rand -base64 32}
+      # SECURITY FIX (LOTUS-002): Require TLS certificates
+      # Generate with: ./scripts/generate-certs.sh
+      # Or place your own certs in ./certs/
