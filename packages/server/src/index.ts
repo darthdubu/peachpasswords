@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import fs from "fs";
 import path from "path";
 import { vaultRoutes } from "./routes/vault";
@@ -48,6 +49,32 @@ app.register(cors, {
   },
   credentials: true,
 });
+
+// Add security headers
+app.addHook('onSend', async (request, reply, payload) => {
+  reply.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('X-Frame-Options', 'DENY');
+  reply.header('X-XSS-Protection', '1; mode=block');
+  reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  reply.header('Permissions-Policy', 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()');
+  reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+});
+
+app.register(rateLimit, {
+  max: 100,
+  timeWindow: '1 minute',
+  keyGenerator: (req) => {
+    return req.headers['x-forwarded-for'] as string || req.ip;
+  },
+  errorResponseBuilder: (req, context) => ({
+    statusCode: 429,
+    error: 'Too Many Requests',
+    message: `Rate limit exceeded. Try again in ${context.after}`,
+    retryAfter: context.after
+  })
+});
+
 app.register(websocket);
 app.register(vaultRoutes, { prefix: "/api" });
 app.register(syncRoutes, { prefix: "/api" });

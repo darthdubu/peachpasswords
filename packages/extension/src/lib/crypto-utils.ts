@@ -116,3 +116,18 @@ export async function decryptMetadata(
     return null
   }
 }
+
+/**
+ * Securely wipe a buffer by overwriting it with zeros.
+ * Use this on sensitive data (keys, passwords) before releasing from memory.
+ * Note: JavaScript garbage collection timing is not guaranteed,
+ * but this reduces the window of exposure.
+ */
+export function secureWipe(buffer: ArrayBuffer | Uint8Array | null | undefined): void {
+  if (!buffer) return
+  if (buffer instanceof ArrayBuffer) {
+    new Uint8Array(buffer).fill(0)
+  } else if (buffer instanceof Uint8Array) {
+    buffer.fill(0)
+  }
+}
