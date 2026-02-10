@@ -23,7 +23,9 @@ interface VaultContextType {
   isLoading: boolean
   error: string | null
   vaultExists: boolean
-  syncStatus: 'disconnected' | 'connecting' | 'connected' | 'error'
+  syncStatus: 'disconnected' | 'connecting' | 'connected' | 'error' | 'offline'
+  syncError: string | null
+  lastSyncTime: number | null
   s3SyncStatus: 'disconnected' | 'connecting' | 'connected' | 'error'
   pendingSave: { url: string, username: string, password: string } | null
   clearPendingSave: () => void
@@ -80,7 +82,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await saveVault(newVault, masterKey)
   }, [masterKey])
 
-  const { syncStatus } = useSync(vault, masterKey, handlePull)
+  const { syncStatus, syncError, lastSyncTime } = useSync(vault, masterKey, handlePull)
   const { s3Status } = useS3Sync(vault, masterKey, handlePull)
 
   const lockVault = useCallback(async () => {
@@ -424,6 +426,8 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     error,
     vaultExists,
     syncStatus,
+    syncError,
+    lastSyncTime,
     s3SyncStatus: s3Status,
     pendingSave,
     clearPendingSave,
