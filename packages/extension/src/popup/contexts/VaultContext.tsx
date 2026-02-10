@@ -201,12 +201,28 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
 
       const encryptedVault = new Uint8Array(result.vault)
-      let decryptedData: ArrayBuffer
+      let decryptedData: ArrayBuffer | undefined
 
       try {
         decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
-      } catch (err) {
-        throw new Error(`Decryption failed: ${err instanceof Error ? err.message : 'unknown error'}`)
+      } catch {
+        const versionCombinations = [
+          'vault:1:0', 'vault:1:1', 'vault:1:2', 'vault:1:3', 'vault:1:4', 
+          'vault:1:5', 'vault:1:6', 'vault:1:7', 'vault:1:8', 'vault:1:9', 'vault:1:10'
+        ]
+        for (const versionStr of versionCombinations) {
+          try {
+            const aad = new TextEncoder().encode(versionStr).buffer as ArrayBuffer
+            decryptedData = await decrypt(vaultKey, encryptedVault.buffer, aad)
+            break
+          } catch {
+            continue
+          }
+        }
+      }
+
+      if (!decryptedData) {
+        throw new Error('Unable to decrypt vault - password may be incorrect or vault is corrupted')
       }
 
       const vaultData = JSON.parse(new TextDecoder().decode(decryptedData))
