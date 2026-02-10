@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useVault } from '../contexts/VaultContext'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './ui/card'
 import { Icons } from './icons'
+
+type View = 'home' | 'create' | 'unlock' | 's3-restore' | 'qr-sync'
 
 interface PasswordStrength {
   score: number
@@ -13,46 +15,182 @@ interface PasswordStrength {
 }
 
 function checkPasswordStrength(password: string): PasswordStrength {
-  const requirements = []
+  const requirements: string[] = []
   let score = 0
 
-  if (password.length >= 12) {
-    score += 1
-  } else {
-    requirements.push('At least 12 characters')
-  }
-
-  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) {
-    score += 1
-  } else {
-    requirements.push('Upper and lowercase letters')
-  }
-
-  if (/\d/.test(password)) {
-    score += 1
-  } else {
-    requirements.push('At least one number')
-  }
-
-  if (/[^a-zA-Z0-9]/.test(password)) {
-    score += 1
-  } else {
-    requirements.push('At least one symbol')
-  }
+  if (password.length >= 12) { score += 1 } else { requirements.push('12+ characters') }
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) { score += 1 } else { requirements.push('Mixed case') }
+  if (/\d/.test(password)) { score += 1 } else { requirements.push('A number') }
+  if (/[^a-zA-Z0-9]/.test(password)) { score += 1 } else { requirements.push('A symbol') }
 
   const labels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong']
   const colors = ['bg-red-500', 'bg-red-400', 'bg-yellow-400', 'bg-green-400', 'bg-green-500']
 
-  return {
-    score,
-    label: labels[score],
-    color: colors[score],
-    requirements
-  }
+  return { score, label: labels[score], color: colors[score], requirements }
 }
 
-export function UnlockScreen() {
-  const { unlockVault, createVault, vaultExists, error } = useVault()
+const fade = {
+  initial: { opacity: 0, y: 6 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -6 },
+  transition: { duration: 0.18, ease: [0.4, 0, 0.2, 1] as number[] }
+}
+
+function ViewHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <div className="flex items-center gap-1.5 mb-3">
+      <button
+        onClick={onBack}
+        className="p-1 rounded-md hover:bg-secondary/80 transition-colors text-muted-foreground hover:text-foreground"
+      >
+        <Icons.arrowLeft className="h-3.5 w-3.5" />
+      </button>
+      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</span>
+    </div>
+  )
+}
+
+function UnlockView({ onForgot }: { onForgot?: () => void }) {
+  const { unlockVault, error } = useVault()
+  const [password, setPassword] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!password) return
+    setIsSubmitting(true)
+    try { await unlockVault(password) } finally { setIsSubmitting(false) }
+  }
+
+  return (
+    <motion.div {...fade} className="flex flex-col h-full">
+      <div className="flex items-center gap-2 mb-4">
+        <img 
+          src="/icons/icon-32.png" 
+          alt="Lotus" 
+          className="w-7 h-7 rounded-lg shadow-md shadow-primary/20"
+        />
+        <span className="text-sm font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Lotus</span>
+      </div>
+
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1">
+        <p className="text-[11px] text-muted-foreground mb-2">Master password</p>
+        <Input
+          type="password"
+          placeholder="Enter password\u2026"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          disabled={isSubmitting}
+          autoFocus
+          className="h-8 text-xs px-2.5 bg-secondary/50 border-border/60"
+        />
+
+        {error && (
+          <p className="text-[10px] text-destructive mt-1.5">{error}</p>
+        )}
+
+        <Button
+          type="submit"
+          disabled={isSubmitting || !password}
+          className="h-8 text-xs mt-3 w-full glow-primary"
+        >
+          {isSubmitting ? (
+            <Icons.refresh className="h-3 w-3 animate-spin" />
+          ) : (
+            'Unlock'
+          )}
+        </Button>
+
+        {onForgot && (
+          <button
+            type="button"
+            onClick={onForgot}
+            className="text-[10px] text-muted-foreground hover:text-primary transition-colors mt-2 self-center"
+          >
+            {"Can\u2019t unlock? Recover vault \u2192"}
+          </button>
+        )}
+      </form>
+    </motion.div>
+  )
+}
+
+function HomeView({ onNavigate }: { onNavigate: (v: View) => void }) {
+  const options = [
+    {
+      key: 'create' as View,
+      icon: Icons.folderPlus,
+      label: 'Create New Vault',
+      desc: 'Start fresh with a new vault',
+      accent: true,
+    },
+    {
+      key: 's3-restore' as View,
+      icon: Icons.cloudDownload,
+      label: 'Restore from S3',
+      desc: 'Recover from cloud backup',
+      accent: false,
+    },
+    {
+      key: 'qr-sync' as View,
+      icon: Icons.smartphone,
+      label: 'Sync from Phone',
+      desc: 'Scan QR to pair with mobile',
+      accent: false,
+    },
+  ]
+
+  return (
+    <motion.div {...fade} className="flex flex-col h-full">
+      <div className="flex flex-col items-center mb-4">
+        <img 
+          src="/icons/icon-48.png" 
+          alt="Lotus" 
+          className="w-9 h-9 rounded-xl shadow-lg shadow-primary/25 mb-2"
+        />
+        <span className="text-sm font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Lotus</span>
+        <p className="text-[10px] text-muted-foreground mt-0.5">Get started</p>
+      </div>
+
+      <div className="flex flex-col gap-1.5 flex-1">
+        {options.map((opt, i) => (
+          <motion.button
+            key={opt.key}
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.06 * i, duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+            onClick={() => onNavigate(opt.key)}
+            className={`
+              flex items-center gap-2.5 p-2.5 rounded-lg text-left transition-all duration-150
+              ${opt.accent
+                ? 'bg-primary/10 border border-primary/20 hover:bg-primary/15 hover:border-primary/30'
+                : 'bg-secondary/40 border border-transparent hover:bg-secondary/70 hover:border-border/50'
+              }
+            `}
+          >
+            <div className={`
+              w-7 h-7 rounded-md flex items-center justify-center shrink-0
+              ${opt.accent
+                ? 'bg-primary/20 text-primary'
+                : 'bg-secondary text-muted-foreground'
+              }
+            `}>
+              <opt.icon className="h-3.5 w-3.5" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-foreground leading-tight">{opt.label}</div>
+              <div className="text-[10px] text-muted-foreground leading-tight mt-0.5">{opt.desc}</div>
+            </div>
+            <Icons.chevronRight className="h-3 w-3 text-muted-foreground/50 ml-auto shrink-0" />
+          </motion.button>
+        ))}
+      </div>
+    </motion.div>
+  )
+}
+
+function CreateView({ onBack }: { onBack: () => void }) {
+  const { createVault } = useVault()
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -62,117 +200,245 @@ export function UnlockScreen() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!password) return
-
     setLocalError('')
-
-    if (!vaultExists) {
-      if (password !== confirmPassword) {
-        setLocalError('Passwords do not match')
-        return
-      }
-      if (strength.score < 3) {
-        setLocalError('Password is too weak. Please use at least 12 characters with mixed case, numbers, and symbols.')
-        return
-      }
-    }
-
+    if (password !== confirmPassword) { setLocalError("Passwords don\u2019t match"); return }
+    if (strength.score < 3) { setLocalError('Password too weak'); return }
     setIsSubmitting(true)
-
-    try {
-      if (vaultExists) {
-        await unlockVault(password)
-      } else {
-        await createVault(password)
-      }
-    } finally {
-      setIsSubmitting(false)
-    }
+    try { await createVault(password) } finally { setIsSubmitting(false) }
   }
 
   return (
-    <div className="w-[340px] h-[520px] flex items-center justify-center p-5 bg-background">
-      <Card className="w-full border-none shadow-none bg-transparent">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-            <Icons.lock className="h-6 w-6 text-primary" />
-          </div>
-          <CardTitle className="text-2xl">
-            {vaultExists ? 'Welcome Back' : 'Create Vault'}
-          </CardTitle>
-          <CardDescription>
-            {vaultExists 
-              ? 'Enter your master password to unlock' 
-              : 'Set a strong master password to protect your data'}
-          </CardDescription>
-        </CardHeader>
-        <form onSubmit={handleSubmit}>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Input
-                type="password"
-                placeholder="Master Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={isSubmitting}
-                autoFocus
+    <motion.div {...fade} className="flex flex-col h-full">
+      <ViewHeader title="New vault" onBack={onBack} />
+
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1 gap-2">
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-1">Master password</p>
+          <Input
+            type="password"
+            placeholder="Choose a strong password\u2026"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={isSubmitting}
+            autoFocus
+            className="h-8 text-xs px-2.5 bg-secondary/50 border-border/60"
+          />
+        </div>
+
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-1">Confirm</p>
+          <Input
+            type="password"
+            placeholder="Repeat password\u2026"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            disabled={isSubmitting}
+            className="h-8 text-xs px-2.5 bg-secondary/50 border-border/60"
+          />
+        </div>
+
+        {password && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-muted-foreground">Strength</span>
+              <span className={`text-[10px] font-medium ${strength.score >= 3 ? 'text-green-500' : strength.score >= 2 ? 'text-yellow-500' : 'text-red-500'}`}>
+                {strength.label}
+              </span>
+            </div>
+            <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
+              <motion.div
+                className={`h-full ${strength.color}`}
+                initial={{ width: 0 }}
+                animate={{ width: `${((strength.score + 1) / 5) * 100}%` }}
+                transition={{ duration: 0.3 }}
               />
             </div>
-            {!vaultExists && (
-              <>
-                <div className="space-y-2">
-                  <Input
-                    type="password"
-                    placeholder="Confirm Password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    disabled={isSubmitting}
-                  />
-                </div>
-                {password && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">Password Strength:</span>
-                      <span className={strength.score >= 3 ? 'text-green-500' : strength.score >= 2 ? 'text-yellow-500' : 'text-red-500'}>
-                        {strength.label}
-                      </span>
-                    </div>
-                    <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                      <div
-                        className={`h-full ${strength.color} transition-all duration-300`}
-                        style={{ width: `${((strength.score + 1) / 5) * 100}%` }}
-                      />
-                    </div>
-                    {strength.requirements.length > 0 && (
-                      <ul className="text-xs text-muted-foreground space-y-0.5">
-                        {strength.requirements.map((req, i) => (
-                          <li key={i}>• {req}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
-              </>
+            {strength.requirements.length > 0 && (
+              <p className="text-[9px] text-muted-foreground">
+                Need: {strength.requirements.join(' \u00b7 ')}
+              </p>
             )}
-            {(error || localError) && (
-              <p className="text-sm text-destructive text-center">{error || localError}</p>
+          </div>
+        )}
+
+        {localError && (
+          <p className="text-[10px] text-destructive">{localError}</p>
+        )}
+
+        <div className="mt-auto">
+          <Button
+            type="submit"
+            disabled={isSubmitting || !password || password !== confirmPassword || strength.score < 2}
+            className="h-8 text-xs w-full glow-primary"
+          >
+            {isSubmitting ? (
+              <Icons.refresh className="h-3 w-3 animate-spin" />
+            ) : (
+              'Create Vault'
             )}
-          </CardContent>
-          <CardFooter>
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={isSubmitting || !password || (!vaultExists && (password !== confirmPassword || strength.score < 2))}
-            >
-              {isSubmitting ? (
-                <Icons.refresh className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                vaultExists ? 'Unlock' : 'Create Vault'
-              )}
-            </Button>
-          </CardFooter>
-        </form>
-      </Card>
+          </Button>
+        </div>
+      </form>
+    </motion.div>
+  )
+}
+
+function S3RestoreView({ onBack }: { onBack: () => void }) {
+  const [bucket, setBucket] = useState('')
+  const [region, setRegion] = useState('')
+  const [accessKey, setAccessKey] = useState('')
+  const [secretKey, setSecretKey] = useState('')
+
+  return (
+    <motion.div {...fade} className="flex flex-col h-full">
+      <ViewHeader title="Restore from S3" onBack={onBack} />
+
+      <div className="flex flex-col gap-2 flex-1">
+        <div className="flex items-center gap-2 p-2 rounded-lg bg-primary/5 border border-primary/10">
+          <Icons.cloud className="h-3.5 w-3.5 text-primary shrink-0" />
+          <p className="text-[10px] text-muted-foreground leading-snug">
+            Enter your S3 bucket details to restore an encrypted backup.
+          </p>
+        </div>
+
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-1">Bucket</p>
+          <Input
+            placeholder="my-vault-backup"
+            value={bucket}
+            onChange={(e) => setBucket(e.target.value)}
+            className="h-7 text-[11px] px-2 bg-secondary/50 border-border/60"
+          />
+        </div>
+
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-1">Region</p>
+          <Input
+            placeholder="us-east-1"
+            value={region}
+            onChange={(e) => setRegion(e.target.value)}
+            className="h-7 text-[11px] px-2 bg-secondary/50 border-border/60"
+          />
+        </div>
+
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-1">Access Key</p>
+          <Input
+            placeholder="AKIA\u2026"
+            value={accessKey}
+            onChange={(e) => setAccessKey(e.target.value)}
+            className="h-7 text-[11px] px-2 bg-secondary/50 border-border/60"
+          />
+        </div>
+
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-1">Secret Key</p>
+          <Input
+            type="password"
+            placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+            value={secretKey}
+            onChange={(e) => setSecretKey(e.target.value)}
+            className="h-7 text-[11px] px-2 bg-secondary/50 border-border/60"
+          />
+        </div>
+
+        <div className="mt-auto">
+          <Button
+            disabled={!bucket || !region || !accessKey || !secretKey}
+            className="h-8 text-xs w-full"
+            onClick={() => {}}
+          >
+            <Icons.cloudDownload className="h-3 w-3 mr-1.5" />
+            Restore Backup
+          </Button>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+function QrSyncView({ onBack }: { onBack: () => void }) {
+  const filledCells = new Set([0, 1, 2, 5, 6, 7, 10, 11, 12, 3, 9, 16, 18, 21, 23, 24])
+
+  return (
+    <motion.div {...fade} className="flex flex-col h-full">
+      <ViewHeader title="Sync from phone" onBack={onBack} />
+
+      <div className="flex flex-col items-center flex-1 justify-center gap-3">
+        <div className="relative">
+          <div className="w-32 h-32 rounded-xl border-2 border-dashed border-border/60 bg-secondary/30 flex items-center justify-center">
+            <div className="grid grid-cols-5 grid-rows-5 gap-[3px] w-20 h-20">
+              {Array.from({ length: 25 }).map((_, i) => (
+                <div
+                  key={i}
+                  className={`rounded-[2px] ${filledCells.has(i) ? 'bg-foreground/80' : 'bg-foreground/10'}`}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="absolute inset-0 rounded-xl border-2 border-primary/40 pulse-glow" />
+        </div>
+
+        <div className="text-center">
+          <p className="text-[11px] font-medium text-foreground">Scan with Lotus Mobile</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {"Open the app \u2192 Settings \u2192 Sync \u2192 Scan Code"}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
+          <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-pulse" />
+          {"Waiting for connection\u2026"}
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+export function UnlockScreen() {
+  const { vaultExists } = useVault()
+  const [view, setView] = useState<View>(vaultExists ? 'unlock' : 'home')
+
+  return (
+    <div className="w-[340px] h-[520px] flex flex-col bg-background overflow-hidden relative">
+      <div className="absolute inset-0 gradient-mesh opacity-60 pointer-events-none" />
+
+      <div className="relative flex flex-col flex-1 p-3.5">
+        <AnimatePresence mode="wait">
+          {view === 'unlock' && (
+            <UnlockView
+              key="unlock"
+              onForgot={() => setView('home')}
+            />
+          )}
+          {view === 'home' && (
+            <HomeView
+              key="home"
+              onNavigate={(v) => setView(v)}
+            />
+          )}
+          {view === 'create' && (
+            <CreateView
+              key="create"
+              onBack={() => setView('home')}
+            />
+          )}
+          {view === 's3-restore' && (
+            <S3RestoreView
+              key="s3-restore"
+              onBack={() => setView('home')}
+            />
+          )}
+          {view === 'qr-sync' && (
+            <QrSyncView
+              key="qr-sync"
+              onBack={() => setView('home')}
+            />
+          )}
+        </AnimatePresence>
+      </div>
+
+      <div className="h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
     </div>
   )
 }
