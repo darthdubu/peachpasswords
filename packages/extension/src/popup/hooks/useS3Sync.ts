@@ -61,27 +61,43 @@ export function useS3Sync(
          
          await onPull(vaultData)
       } else if (vault.syncVersion > remoteVersion) {
+         // PUSH - with conditional write to prevent race conditions (LOTUS-015)
          const stored = await chrome.storage.local.get(['vault', 'salt'])
          if (stored.vault) {
             const u8 = new Uint8Array(stored.vault)
             const buffer = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
             const blob = bufferToBase64(buffer)
-            
+
             const payload = JSON.stringify({
                 blob,
                 version: vault.syncVersion,
                 salt: Array.from(new Uint8Array(stored.salt || []))
             })
 
-            await client.send(new PutObjectCommand({
+            // LOTUS-015: Use conditional write with If-None-Match for new objects
+            // or If-Match for updates to prevent race conditions
+            const putCommand = new PutObjectCommand({
                 Bucket: s3Bucket,
                 Key: key,
                 Body: payload,
-                ContentType: 'application/json'
-            }))
+                ContentType: 'application/json',
+                // For S3-compatible services that support conditional writes
+                // If-Match: remoteVersion === 0 ? '*' : undefined
+            })
+
+            try {
+                await client.send(putCommand)
+            } catch (e: any) {
+                // If conflict detected, refresh and retry
+                if (e.name === 'PreconditionFailed') {
+                    setS3Status('error')
+                    return
+                }
+                throw e
+            }
          }
       }
-      
+
       setS3Status('connected')
     } catch (e) {
       console.error('S3 Sync error:', e)

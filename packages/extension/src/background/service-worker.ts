@@ -57,11 +57,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'PROMPT_SAVE') {
-    // Store pending save in session
-    chrome.storage.session.set({ pendingSave: message.data })
+    // Store pending save in session with timestamp
+    chrome.storage.session.set({
+      pendingSave: {
+        ...message.data,
+        _timestamp: Date.now()
+      }
+    })
     // Set badge to indicate action needed
     chrome.action.setBadgeText({ text: '!' })
     chrome.action.setBadgeBackgroundColor({ color: '#10b981' })
+
+    // LOTUS-013: Auto-clear pending save after 5 minutes
+    setTimeout(() => {
+      chrome.storage.session.get('pendingSave').then((result) => {
+        if (result.pendingSave?._timestamp === message.data._timestamp) {
+          chrome.storage.session.remove('pendingSave')
+          chrome.action.setBadgeText({ text: '' })
+        }
+      })
+    }, 5 * 60 * 1000)
+
     return true
   }
 })
