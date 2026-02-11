@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useVault } from '../contexts/VaultContext'
 import { Button } from './ui/button'
@@ -7,6 +7,8 @@ import { Icons } from './icons'
 import QRCode from 'react-qr-code'
 
 type View = 'home' | 'create' | 'unlock' | 's3-restore' | 'qr-sync'
+type LastAuthMethod = 'password' | 'pin' | 'biometric'
+const LAST_AUTH_METHOD_KEY = 'peach_last_auth_method'
 
 interface PasswordStrength {
   score: number
@@ -52,16 +54,134 @@ function ViewHeader({ title, onBack }: { title: string; onBack: () => void }) {
 }
 
 function UnlockView({ onForgot }: { onForgot?: () => void }) {
-  const { unlockVault, error } = useVault()
+  const { unlockVault, unlockWithPin, unlockWithBiometric, error } = useVault()
   const [password, setPassword] = useState('')
+  const [pin, setPin] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [usePinMode, setUsePinMode] = useState(false)
+  const [pinAvailable, setPinAvailable] = useState(false)
+  const [biometricAvailable, setBiometricAvailable] = useState(false)
+  const [preferredAuthMethod, setPreferredAuthMethod] = useState<LastAuthMethod>('password')
+  const [pinLockRemainingMs, setPinLockRemainingMs] = useState(0)
+  const [triedAutoBiometric, setTriedAutoBiometric] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const formatRemaining = (remainingMs: number) => {
+    const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000))
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    if (minutes > 0) return `${minutes}m ${seconds}s`
+    return `${seconds}s`
+  }
+
+  const refreshPinLockStatus = useCallback(async () => {
+    const { getPinLockoutStatus } = await import('../../lib/pin')
+    const lockout = await getPinLockoutStatus()
+    setPinLockRemainingMs(lockout.isLocked ? lockout.remainingMs : 0)
+  }, [])
+
+  const isPinLocked = pinLockRemainingMs > 0
+
+  useEffect(() => {
+    const checkAuthOptions = async () => {
+      const [{ hasPin }, { hasBiometricCredential }] = await Promise.all([
+        import('../../lib/pin'),
+        import('../../lib/biometric')
+      ])
+      const pinIsAvailable = await hasPin()
+      const biometricIsAvailable = await hasBiometricCredential()
+      setPinAvailable(pinIsAvailable)
+      setBiometricAvailable(biometricIsAvailable)
+
+      const pref = await chrome.storage.local.get([LAST_AUTH_METHOD_KEY])
+      const lastAuthMethod = pref[LAST_AUTH_METHOD_KEY] as LastAuthMethod | undefined
+      const preferred = lastAuthMethod || 'password'
+      setPreferredAuthMethod(preferred)
+
+      if (pinIsAvailable && preferred === 'pin') {
+        setUsePinMode(true)
+      } else {
+        setUsePinMode(false)
+      }
+    }
+    checkAuthOptions()
+  }, [])
+
+  useEffect(() => {
+    if (!pinAvailable) {
+      setPinLockRemainingMs(0)
+      return
+    }
+
+    let isMounted = true
+
+    const refresh = async () => {
+      const { getPinLockoutStatus } = await import('../../lib/pin')
+      const lockout = await getPinLockoutStatus()
+      if (!isMounted) return
+      setPinLockRemainingMs(lockout.isLocked ? lockout.remainingMs : 0)
+    }
+
+    void refresh()
+    const intervalId = window.setInterval(() => {
+      void refresh()
+    }, 1000)
+
+    return () => {
+      isMounted = false
+      window.clearInterval(intervalId)
+    }
+  }, [pinAvailable])
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!password) return
     setIsSubmitting(true)
-    try { await unlockVault(password) } finally { setIsSubmitting(false) }
+    try {
+      const success = await unlockVault(password)
+      if (success) {
+        await chrome.storage.local.set({ [LAST_AUTH_METHOD_KEY]: 'password' satisfies LastAuthMethod })
+        setPreferredAuthMethod('password')
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
   }
+
+  const handlePinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (pin.length !== 6 || isPinLocked) return
+    setIsSubmitting(true)
+    try {
+      const success = await unlockWithPin(pin)
+      if (success) {
+        await chrome.storage.local.set({ [LAST_AUTH_METHOD_KEY]: 'pin' satisfies LastAuthMethod })
+        setPreferredAuthMethod('pin')
+      }
+      await refreshPinLockStatus()
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleBiometricUnlock = async () => {
+    setIsSubmitting(true)
+    try {
+      const success = await unlockWithBiometric()
+      if (success) {
+        await chrome.storage.local.set({ [LAST_AUTH_METHOD_KEY]: 'biometric' satisfies LastAuthMethod })
+        setPreferredAuthMethod('biometric')
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  useEffect(() => {
+    if (triedAutoBiometric) return
+    if (preferredAuthMethod !== 'biometric' || !biometricAvailable || usePinMode || isSubmitting) return
+    setTriedAutoBiometric(true)
+    void handleBiometricUnlock()
+  }, [preferredAuthMethod, biometricAvailable, usePinMode, isSubmitting, triedAutoBiometric])
 
   return (
     <motion.div {...fade} className="flex flex-col h-full">
@@ -74,44 +194,127 @@ function UnlockView({ onForgot }: { onForgot?: () => void }) {
         <span className="text-sm font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">Peach</span>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col flex-1">
-        <p className="text-[11px] text-muted-foreground mb-2">Master password</p>
-        <Input
-          type="password"
-          placeholder="Enter password…"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          disabled={isSubmitting}
-          autoFocus
-          className="h-10 text-sm px-2.5 bg-secondary/50 border-border/60"
-        />
+      {usePinMode ? (
+        <form onSubmit={handlePinSubmit} className="flex flex-col flex-1">
+          <p className="text-[11px] text-muted-foreground mb-2">Enter PIN</p>
+          <Input
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
+            placeholder="• • • • • •"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            disabled={isSubmitting || isPinLocked}
+            autoFocus
+            className="h-10 text-sm px-2.5 bg-secondary/50 border-border/60 text-center text-lg tracking-[0.5em]"
+          />
 
-        {error && (
-          <p className="text-[10px] text-destructive mt-1.5">{error}</p>
-        )}
-
-        <Button
-          type="submit"
-          disabled={isSubmitting || !password}
-          className="h-10 text-sm mt-3 w-full glow-primary"
-        >
-          {isSubmitting ? (
-            <Icons.refresh className="h-3 w-3 animate-spin" />
-          ) : (
-            'Unlock'
+          {error && (
+            <p className="text-[10px] text-destructive mt-1.5">{error}</p>
           )}
-        </Button>
+          {isPinLocked && (
+            <p className="text-[10px] text-amber-500 mt-1.5">
+              PIN temporarily locked. Try again in {formatRemaining(pinLockRemainingMs)}.
+            </p>
+          )}
 
-        {onForgot && (
+          <Button
+            type="submit"
+            disabled={isSubmitting || pin.length !== 6 || isPinLocked}
+            className="h-10 text-sm mt-3 w-full glow-primary"
+          >
+            {isSubmitting ? (
+              <Icons.refresh className="h-3 w-3 animate-spin" />
+            ) : (
+              'Unlock'
+            )}
+          </Button>
+
           <button
             type="button"
-            onClick={onForgot}
+            onClick={() => {
+              setUsePinMode(false)
+              setPin('')
+            }}
             className="text-[10px] text-muted-foreground hover:text-primary transition-colors mt-2 self-center"
           >
-            {"Can\u2019t unlock? Recover vault \u2192"}
+            Use password instead
           </button>
-        )}
-      </form>
+        </form>
+      ) : (
+        <form onSubmit={handlePasswordSubmit} className="flex flex-col flex-1">
+          <p className="text-[11px] text-muted-foreground mb-2">Master password</p>
+          <Input
+            type="password"
+            placeholder="Enter password…"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={isSubmitting}
+            autoFocus
+            className="h-10 text-sm px-2.5 bg-secondary/50 border-border/60"
+          />
+
+          {error && (
+            <p className="text-[10px] text-destructive mt-1.5">{error}</p>
+          )}
+
+          <Button
+            type="submit"
+            disabled={isSubmitting || !password}
+            className="h-10 text-sm mt-3 w-full glow-primary"
+          >
+            {isSubmitting ? (
+              <Icons.refresh className="h-3 w-3 animate-spin" />
+            ) : (
+              'Unlock'
+            )}
+          </Button>
+
+          {biometricAvailable && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleBiometricUnlock}
+              disabled={isSubmitting}
+              className="h-10 text-sm mt-2 w-full"
+            >
+              <Icons.fingerprint className="h-3.5 w-3.5 mr-1.5" />
+              {preferredAuthMethod === 'biometric' ? 'Unlock with Touch ID (recommended)' : 'Unlock with Touch ID'}
+            </Button>
+          )}
+
+          {pinAvailable && (
+            <div className="flex flex-col items-center mt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setUsePinMode(true)
+                  setPassword('')
+                }}
+                className="text-[10px] text-muted-foreground hover:text-primary transition-colors self-center"
+              >
+                Unlock with PIN
+              </button>
+              {isPinLocked && (
+                <p className="text-[10px] text-amber-500 mt-1">
+                  PIN locked for {formatRemaining(pinLockRemainingMs)}
+                </p>
+              )}
+            </div>
+          )}
+
+          {onForgot && (
+            <button
+              type="button"
+              onClick={onForgot}
+              className="text-[10px] text-muted-foreground hover:text-primary transition-colors mt-1 self-center"
+            >
+              {"Can't unlock? Recover vault →"}
+            </button>
+          )}
+        </form>
+      )}
     </motion.div>
   )
 }
@@ -364,6 +567,11 @@ function QrSyncView({ onBack, onConfigured }: { onBack: () => void; onConfigured
   const [pairingQR, setPairingQR] = useState<string | null>(null)
   const [isPolling, setIsPolling] = useState(false)
   const [isConfigured, setIsConfigured] = useState(false)
+  const pairingTokenRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    pairingTokenRef.current = pairingToken
+  }, [pairingToken])
 
   useEffect(() => {
     const loadExistingSettings = async () => {
@@ -379,6 +587,12 @@ function QrSyncView({ onBack, onConfigured }: { onBack: () => void; onConfigured
       }
     }
     loadExistingSettings()
+
+    return () => {
+      if (pairingTokenRef.current) {
+        chrome.storage.session.remove(`pairing_${pairingTokenRef.current}`)
+      }
+    }
   }, [])
 
   const startPairing = async () => {
@@ -473,6 +687,21 @@ function QrSyncView({ onBack, onConfigured }: { onBack: () => void; onConfigured
               <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-pulse" />
               Waiting for phone to connect&hellip;
             </div>
+
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={async () => {
+                if (pairingToken) {
+                  await chrome.storage.session.remove(`pairing_${pairingToken}`)
+                }
+                setIsPolling(false)
+                setPairingToken(null)
+                setPairingQR(null)
+              }}
+            >
+              Cancel
+            </Button>
           </div>
         ) : (
           <div className="space-y-4">

@@ -6,6 +6,7 @@ import { Label } from './ui/label'
 import { Icons } from './icons'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { VaultEntry } from '@lotus/shared'
+import { normalizeStoredUrl } from '../../lib/url-match'
 
 interface EntryFormProps {
   initialEntry?: VaultEntry | null
@@ -101,10 +102,11 @@ export function EntryForm({ initialEntry, initialPassword, onSave, onCancel }: E
 
       if (type === 'login') {
         const encryptedPassword = await encryptValue(password, entryId)
+        const normalizedUrl = normalizeStoredUrl(url)
         entry.login = {
           username,
           password: encryptedPassword,
-          urls: url ? [url] : []
+          urls: normalizedUrl ? [normalizedUrl] : []
         }
       } else if (type === 'card') {
         const encryptedNumber = await encryptValue(cardNumber, entryId)

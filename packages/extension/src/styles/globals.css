@@ -101,6 +101,26 @@
     font-family: "Geist Sans", -apple-system, BlinkMacSystemFont, sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
+  
+  /* Hide scrollbars globally but keep functionality */
+  * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  *::-webkit-scrollbar {
+    display: none;
+  }
+
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    -ms-overflow-style: auto;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    display: block;
+    width: 6px;
+  }
 }
 
 @layer utilities {

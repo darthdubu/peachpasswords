@@ -9,6 +9,12 @@ export interface BiometricCredential {
 
 const BIOMETRIC_STORAGE_KEY = 'peach_biometric_credential'
 
+function toArrayBuffer(view: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(view.byteLength)
+  copy.set(view)
+  return copy.buffer
+}
+
 /**
  * Derive a wrapping key from PRF (Pseudo-Random Function) output.
  * The PRF extension provides deterministic output for the same credential,
@@ -30,7 +36,7 @@ async function deriveWrappingKeyFromPRF(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: salt.buffer as ArrayBuffer,
+      salt: toArrayBuffer(salt),
       info: new TextEncoder().encode('peach-biometric-prf-v1'),
     },
     keyMaterial,
@@ -175,7 +181,7 @@ export async function registerBiometric(
 
     const wrappingKey = await deriveWrappingKeyFromPRF(prfOutput, wrappingSalt)
 
-    const encryptedKeyBuffer = await encrypt(wrappingKey, masterKeyRaw)
+    const encryptedKeyBuffer = await encrypt(wrappingKey, masterKeyRaw.slice(0))
 
     const combined = new Uint8Array(wrappingSalt.length + encryptedKeyBuffer.byteLength)
     combined.set(wrappingSalt, 0)
@@ -248,7 +254,7 @@ export async function authenticateWithBiometric(): Promise<CryptoKey | null> {
 
     const wrappingKey = await deriveWrappingKeyFromPRF(prfOutput, wrappingSalt)
 
-    const decryptedKeyBuffer = await decrypt(wrappingKey, encryptedKey.buffer)
+    const decryptedKeyBuffer = await decrypt(wrappingKey, toArrayBuffer(encryptedKey))
 
     return crypto.subtle.importKey(
       'raw',

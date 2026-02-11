@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
 import { Vault, VaultEntry } from '@lotus/shared'
 import { deriveKeyFromPasswordWithRaw, encrypt, decrypt, generateSalt, bufferToBase64, base64ToBuffer, deriveSubKey, encryptSettings, decryptSettings, EncryptedSettings, computeVaultHash, verifyVaultIntegrity } from '../../lib/crypto-utils'
 import { authenticateWithBiometric } from '../../lib/biometric'
@@ -12,6 +12,7 @@ interface VaultContextType {
   masterKey: CryptoKey | null
   unlockVault: (password: string) => Promise<boolean>
   unlockWithBiometric: () => Promise<boolean>
+  unlockWithPin: (pin: string) => Promise<boolean>
   lockVault: () => void
   createVault: (password: string) => Promise<void>
   addEntry: (entry: VaultEntry) => Promise<void>
@@ -45,16 +46,83 @@ export const useVault = () => {
   return context
 }
 
+function formatRemaining(remainingMs: number): string {
+  const totalSeconds = Math.ceil(remainingMs / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`
+  }
+  return `${seconds}s`
+}
+
+function toArrayBuffer(view: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(view.byteLength)
+  copy.set(view)
+  return copy.buffer
+}
+
+async function decryptVaultPayload(
+  vaultKey: CryptoKey,
+  encryptedVault: Uint8Array,
+  aadHint?: string,
+  syncVersionHint?: number
+): Promise<ArrayBuffer | null> {
+  const encryptedBuffer = toArrayBuffer(encryptedVault)
+  try {
+    return await decrypt(vaultKey, encryptedBuffer)
+  } catch {
+    // Continue with AAD-based decrypt attempts
+  }
+
+  const tried = new Set<string>()
+  const tryWithAad = async (aadValue: string): Promise<ArrayBuffer | null> => {
+    if (tried.has(aadValue)) return null
+    tried.add(aadValue)
+    try {
+      const aad = new TextEncoder().encode(aadValue).buffer as ArrayBuffer
+      return await decrypt(vaultKey, encryptedBuffer, aad)
+    } catch {
+      return null
+    }
+  }
+
+  if (aadHint) {
+    const decryptedWithHint = await tryWithAad(aadHint)
+    if (decryptedWithHint) return decryptedWithHint
+  }
+
+  if (typeof syncVersionHint === 'number' && Number.isFinite(syncVersionHint) && syncVersionHint >= 0) {
+    const hintedAad = `vault:1:${Math.floor(syncVersionHint)}`
+    const decryptedWithSyncHint = await tryWithAad(hintedAad)
+    if (decryptedWithSyncHint) return decryptedWithSyncHint
+  }
+
+  for (let syncVersion = 0; syncVersion <= 10; syncVersion += 1) {
+    const decrypted = await tryWithAad(`vault:1:${syncVersion}`)
+    if (decrypted) return decrypted
+  }
+
+  // Migration recovery path for old installs that lack stored AAD hints.
+  // We bound this loop to avoid excessive unlock latency.
+  for (let syncVersion = 11; syncVersion <= 5000; syncVersion += 1) {
+    const decrypted = await tryWithAad(`vault:1:${syncVersion}`)
+    if (decrypted) return decrypted
+  }
+
+  return null
+}
+
 export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [vault, setVault] = useState<Vault | null>(null)
   const [isUnlocked, setIsUnlocked] = useState(false)
   const [masterKey, setMasterKey] = useState<CryptoKey | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [idleTimer, setIdleTimer] = useState<NodeJS.Timeout | null>(null)
   const [vaultExists, setVaultExists] = useState(false)
   const [pendingSave, setPendingSave] = useState<{ url: string, username: string, password: string } | null>(null)
-  
+  const skipScheduleOnCloseRef = useRef(false)
+
   const saveVault = async (vaultData: Vault, key: CryptoKey) => {
     // LOTUS-005: Compute content hash before saving
     const contentHash = await computeVaultHash(vaultData)
@@ -74,7 +142,9 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     await chrome.storage.local.set({
       vault: Array.from(new Uint8Array(encryptedVault)),
-      lastSync: vaultData.lastSync
+      lastSync: vaultData.lastSync,
+      vaultAad: `vault:${vaultData.version}:${vaultData.syncVersion}`,
+      vaultSyncVersion: vaultData.syncVersion
     })
   }
 
@@ -88,36 +158,49 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const { s3Status } = useS3Sync(vault, masterKey, handlePull)
 
   const lockVault = useCallback(async () => {
+    skipScheduleOnCloseRef.current = true
     setVault(null)
     setIsUnlocked(false)
     setMasterKey(null)
-    if (idleTimer) clearTimeout(idleTimer)
-    setIdleTimer(null)
     // Clear sensitive data from memory
     // SECURITY FIX (LOTUS-001): Do NOT remove 'vault' - encrypted vault should persist
     chrome.storage.session.remove(['masterKey', 'masterKeyRaw', 'autofillKey', 'autofillData'])
     // LOTUS-014: Notify background to clear alarm
     await chrome.runtime.sendMessage({ type: 'LOCK_NOW' }).catch(() => {})
-  }, [idleTimer])
+  }, [])
+
+  const getIdleTimeoutMs = useCallback(async (): Promise<number> => {
+    const result = await chrome.storage.local.get([STORAGE_KEYS.SETTINGS])
+    const settings = result[STORAGE_KEYS.SETTINGS]
+
+    if (settings?.encrypted && masterKey) {
+      const decrypted = await decryptSettings(masterKey, settings.encrypted as EncryptedSettings)
+      const encryptedMinutes = Number(decrypted?.idleTimeoutMinutes)
+      if (Number.isFinite(encryptedMinutes) && encryptedMinutes > 0) {
+        return encryptedMinutes * 60 * 1000
+      }
+    }
+
+    const plainMinutes = Number(settings?.idleTimeoutMinutes)
+    if (Number.isFinite(plainMinutes) && plainMinutes > 0) {
+      return plainMinutes * 60 * 1000
+    }
+
+    return 5 * 60 * 1000
+  }, [masterKey])
 
   // Auto-lock functionality using chrome.alarms (LOTUS-014)
-  const resetIdleTimer = useCallback(async () => {
-    if (idleTimer) clearTimeout(idleTimer)
-
-    const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS)
-    const idleTimeoutMinutes = result[STORAGE_KEYS.SETTINGS]?.idleTimeoutMinutes || 5
-    const idleTimeoutMs = idleTimeoutMinutes * 60 * 1000
-
+  const scheduleLockAlarm = useCallback(async () => {
+    const idleTimeoutMs = await getIdleTimeoutMs()
     chrome.runtime.sendMessage({ 
       type: 'SCHEDULE_LOCK', 
       delayMs: idleTimeoutMs 
     }).catch(() => {})
+  }, [getIdleTimeoutMs])
 
-    const timer = setTimeout(() => {
-      lockVault()
-    }, idleTimeoutMs)
-    setIdleTimer(timer)
-  }, [idleTimer, lockVault])
+  const clearLockAlarm = useCallback(async () => {
+    chrome.runtime.sendMessage({ type: 'CLEAR_LOCK' }).catch(() => {})
+  }, [])
 
 
 
@@ -141,6 +224,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setVault(newVault)
       setMasterKey(key)
       setIsUnlocked(true)
+      skipScheduleOnCloseRef.current = false
       setVaultExists(true)
 
       // Store raw key bytes in session storage (NOT the HKDF key which can't be exported)
@@ -149,14 +233,14 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await exportAutofillData(newVault, key)
       
       await saveVault(newVault, key)
-      resetIdleTimer()
+      await clearLockAlarm()
     } catch (err) {
       console.error(err)
       setError(`Failed to create vault: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setIsLoading(false)
     }
-  }, [resetIdleTimer])
+  }, [clearLockAlarm])
 
   const exportAutofillData = async (vaultData: Vault, masterKey: CryptoKey) => {
     try {
@@ -198,7 +282,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     try {
       // Get stored vault data
-      const result = await chrome.storage.local.get(['vault', 'salt'])
+      const result = await chrome.storage.local.get(['vault', 'salt', 'vaultAad', 'vaultSyncVersion'])
       if (!result.vault || !result.salt) {
         throw new Error('No vault found')
       }
@@ -207,27 +291,13 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const { key, rawBytes } = await deriveKeyFromPasswordWithRaw(password, salt)
 
       const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
-
       const encryptedVault = new Uint8Array(result.vault)
-      let decryptedData: ArrayBuffer | undefined
-
-      try {
-        decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
-      } catch {
-        const versionCombinations = [
-          'vault:1:0', 'vault:1:1', 'vault:1:2', 'vault:1:3', 'vault:1:4',
-          'vault:1:5', 'vault:1:6', 'vault:1:7', 'vault:1:8', 'vault:1:9', 'vault:1:10'
-        ]
-        for (const versionStr of versionCombinations) {
-          try {
-            const aad = new TextEncoder().encode(versionStr).buffer as ArrayBuffer
-            decryptedData = await decrypt(vaultKey, encryptedVault.buffer, aad)
-            break
-          } catch {
-            continue
-          }
-        }
-      }
+      const decryptedData = await decryptVaultPayload(
+        vaultKey,
+        encryptedVault,
+        typeof result.vaultAad === 'string' ? result.vaultAad : undefined,
+        typeof result.vaultSyncVersion === 'number' ? result.vaultSyncVersion : undefined
+      )
 
       if (!decryptedData) {
         throw new Error('Unable to decrypt vault - password may be incorrect or vault is corrupted')
@@ -243,14 +313,14 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setVault(vaultData)
       setMasterKey(key)
       setIsUnlocked(true)
+      skipScheduleOnCloseRef.current = false
 
       // Store raw key bytes in session storage for grace period restoration
       await chrome.storage.session.set({ masterKeyRaw: Array.from(rawBytes) })
 
       // Export autofill data for background script
       await exportAutofillData(vaultData, key)
-
-      resetIdleTimer()
+      await clearLockAlarm()
 
       return true
     } catch (err) {
@@ -261,14 +331,14 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
            setIsLoading(false)
     }
-  }, [resetIdleTimer])
+  }, [clearLockAlarm])
 
   const unlockWithBiometric = useCallback(async (): Promise<boolean> => {
     setIsLoading(true)
     setError(null)
 
     try {
-      const result = await chrome.storage.local.get(['vault'])
+      const result = await chrome.storage.local.get(['vault', 'vaultAad', 'vaultSyncVersion'])
       if (!result.vault) {
         throw new Error('No vault found')
       }
@@ -280,25 +350,12 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
       const encryptedVault = new Uint8Array(result.vault)
-      let decryptedData: ArrayBuffer | undefined
-
-      try {
-        decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
-      } catch {
-        const versionCombinations = [
-          'vault:1:0', 'vault:1:1', 'vault:1:2', 'vault:1:3', 'vault:1:4',
-          'vault:1:5', 'vault:1:6', 'vault:1:7', 'vault:1:8', 'vault:1:9', 'vault:1:10'
-        ]
-        for (const versionStr of versionCombinations) {
-          try {
-            const aad = new TextEncoder().encode(versionStr).buffer as ArrayBuffer
-            decryptedData = await decrypt(vaultKey, encryptedVault.buffer, aad)
-            break
-          } catch {
-            continue
-          }
-        }
-      }
+      const decryptedData = await decryptVaultPayload(
+        vaultKey,
+        encryptedVault,
+        typeof result.vaultAad === 'string' ? result.vaultAad : undefined,
+        typeof result.vaultSyncVersion === 'number' ? result.vaultSyncVersion : undefined
+      )
 
       if (!decryptedData) {
         throw new Error('Unable to decrypt vault with biometric')
@@ -314,11 +371,12 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setVault(vaultData)
       setMasterKey(key)
       setIsUnlocked(true)
+      skipScheduleOnCloseRef.current = false
 
       // Note: For biometric auth, we cannot easily get the raw bytes
       // The biometric credential stores the encrypted raw bytes internally
       await exportAutofillData(vaultData, key)
-      resetIdleTimer()
+      await clearLockAlarm()
 
       return true
     } catch (err) {
@@ -329,7 +387,85 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setIsLoading(false)
     }
-  }, [resetIdleTimer])
+  }, [clearLockAlarm])
+
+  const unlockWithPin = useCallback(async (pin: string): Promise<boolean> => {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const result = await chrome.storage.local.get(['vault', 'vaultAad', 'vaultSyncVersion'])
+      if (!result.vault) {
+        throw new Error('No vault found')
+      }
+
+      const { decryptMasterKeyWithPin, getPinLockoutStatus, recordFailedPinAttempt, clearPinLockout } = await import('../../lib/pin')
+      const lockout = await getPinLockoutStatus()
+      if (lockout.isLocked) {
+        throw new Error(`Too many PIN attempts. Try again in ${formatRemaining(lockout.remainingMs)}`)
+      }
+
+      const rawMasterKey = await decryptMasterKeyWithPin(pin)
+      if (!rawMasterKey) {
+        const attempt = await recordFailedPinAttempt()
+        if (attempt.isLocked) {
+          throw new Error(`Too many PIN attempts. Try again in ${formatRemaining(attempt.remainingMs)}`)
+        }
+        const remainingBeforeLock = Math.max(0, 5 - attempt.failedAttempts)
+        if (remainingBeforeLock > 0) {
+          throw new Error(`Invalid PIN. ${remainingBeforeLock} attempts remaining before temporary lock.`)
+        }
+        throw new Error('Invalid PIN')
+      }
+
+      const key = await crypto.subtle.importKey(
+        'raw',
+        rawMasterKey.buffer as ArrayBuffer,
+        { name: 'HKDF' },
+        false,
+        ['deriveKey']
+      )
+
+      const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
+      const encryptedVault = new Uint8Array(result.vault)
+      const decryptedData = await decryptVaultPayload(
+        vaultKey,
+        encryptedVault,
+        typeof result.vaultAad === 'string' ? result.vaultAad : undefined,
+        typeof result.vaultSyncVersion === 'number' ? result.vaultSyncVersion : undefined
+      )
+
+      if (!decryptedData) {
+        throw new Error('Unable to decrypt vault with PIN')
+      }
+
+      const vaultData = JSON.parse(new TextDecoder().decode(decryptedData))
+
+      const isValid = await verifyVaultIntegrity(vaultData)
+      if (!isValid) {
+        throw new Error('Vault integrity check failed')
+      }
+
+      setVault(vaultData)
+      setMasterKey(key)
+      setIsUnlocked(true)
+      skipScheduleOnCloseRef.current = false
+
+      await clearPinLockout()
+      await chrome.storage.session.set({ masterKeyRaw: Array.from(rawMasterKey) })
+      await exportAutofillData(vaultData, key)
+      await clearLockAlarm()
+
+      return true
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+      console.error('PIN unlock error:', errorMsg)
+      setError(`PIN unlock failed: ${errorMsg}`)
+      return false
+    } finally {
+      setIsLoading(false)
+    }
+  }, [clearLockAlarm])
 
   const addEntry = useCallback(async (entry: VaultEntry) => {
     if (!vault || !masterKey) return
@@ -484,6 +620,37 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     })
   }, [])
 
+  // Grace period starts when popup closes (not when user unlocks).
+  useEffect(() => {
+    if (!isUnlocked) return
+
+    const scheduleOnHide = () => {
+      if (skipScheduleOnCloseRef.current) return
+      if (document.visibilityState === 'hidden') {
+        void scheduleLockAlarm()
+      }
+    }
+
+    const scheduleOnClose = () => {
+      if (skipScheduleOnCloseRef.current) return
+      void scheduleLockAlarm()
+    }
+
+    void clearLockAlarm()
+    document.addEventListener('visibilitychange', scheduleOnHide)
+    window.addEventListener('pagehide', scheduleOnClose)
+    window.addEventListener('beforeunload', scheduleOnClose)
+
+    return () => {
+      document.removeEventListener('visibilitychange', scheduleOnHide)
+      window.removeEventListener('pagehide', scheduleOnClose)
+      window.removeEventListener('beforeunload', scheduleOnClose)
+      if (!skipScheduleOnCloseRef.current) {
+        void scheduleLockAlarm()
+      }
+    }
+  }, [isUnlocked, clearLockAlarm, scheduleLockAlarm])
+
   // Initialize vault on mount - check for existing session
   useEffect(() => {
     const init = async () => {
@@ -491,8 +658,8 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const hasVault = !!localResult.vault
       setVaultExists(hasVault)
       
-      const sessionResult = await chrome.storage.session.get(['masterKeyRaw', 'autofillKey'])
-      if (sessionResult.masterKeyRaw && sessionResult.autofillKey && hasVault) {
+      const sessionResult = await chrome.storage.session.get(['masterKeyRaw'])
+      if (sessionResult.masterKeyRaw && hasVault) {
         try {
           const rawBytes = new Uint8Array(sessionResult.masterKeyRaw)
           const key = await crypto.subtle.importKey(
@@ -503,29 +670,16 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ['deriveKey']
           )
           
-          const vaultResult = await chrome.storage.local.get(['vault'])
+          const vaultResult = await chrome.storage.local.get(['vault', 'vaultAad', 'vaultSyncVersion'])
           if (vaultResult.vault) {
             const encryptedVault = new Uint8Array(vaultResult.vault)
             const vaultKey = await deriveSubKey(key, 'vault-main', ['encrypt', 'decrypt'])
-            
-            let decryptedData
-            try {
-              decryptedData = await decrypt(vaultKey, encryptedVault.buffer)
-            } catch {
-              const versionCombinations = [
-                'vault:1:0', 'vault:1:1', 'vault:1:2', 'vault:1:3', 'vault:1:4',
-                'vault:1:5', 'vault:1:6', 'vault:1:7', 'vault:1:8', 'vault:1:9', 'vault:1:10'
-              ]
-              for (const versionStr of versionCombinations) {
-                try {
-                  const aad = new TextEncoder().encode(versionStr).buffer as ArrayBuffer
-                  decryptedData = await decrypt(vaultKey, encryptedVault.buffer, aad)
-                  break
-                } catch {
-                  continue
-                }
-              }
-            }
+            const decryptedData = await decryptVaultPayload(
+              vaultKey,
+              encryptedVault,
+              typeof vaultResult.vaultAad === 'string' ? vaultResult.vaultAad : undefined,
+              typeof vaultResult.vaultSyncVersion === 'number' ? vaultResult.vaultSyncVersion : undefined
+            )
             
             if (decryptedData) {
               const vaultData = JSON.parse(new TextDecoder().decode(decryptedData))
@@ -533,7 +687,9 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 setVault(vaultData)
                 setMasterKey(key)
                 setIsUnlocked(true)
-                resetIdleTimer()
+                skipScheduleOnCloseRef.current = false
+                await exportAutofillData(vaultData, key)
+                await clearLockAlarm()
               }
             }
           }
@@ -546,7 +702,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     
     init()
-  }, [])
+  }, [clearLockAlarm])
 
   const value: VaultContextType = {
     vault,
@@ -554,6 +710,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     masterKey,
     unlockVault,
     unlockWithBiometric,
+    unlockWithPin,
     lockVault,
     createVault,
     addEntry,

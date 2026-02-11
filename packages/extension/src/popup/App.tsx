@@ -10,6 +10,7 @@ import { Settings } from './components/Settings'
 import { VaultEntry } from '@lotus/shared'
 import { Icons } from './components/icons'
 import { Button } from './components/ui/button'
+import { normalizeStoredUrl, parseUrlCandidate } from '../lib/url-match'
 
 function Main() {
   const { isUnlocked, isLoading, lockVault, deleteEntry, pendingSave, clearPendingSave, syncStatus, s3SyncStatus } = useVault()
@@ -19,10 +20,12 @@ function Main() {
   // Handle pending save from background script
   useEffect(() => {
     if (pendingSave && isUnlocked) {
+      const normalizedUrl = normalizeStoredUrl(pendingSave.url)
+      const displayHost = parseUrlCandidate(normalizedUrl)?.hostname || pendingSave.url
       const entry: VaultEntry = {
         id: '',
         type: 'login',
-        name: new URL(pendingSave.url).hostname,
+        name: displayHost,
         created: Date.now(),
         modified: Date.now(),
         tags: [],
@@ -30,7 +33,7 @@ function Main() {
         login: {
           username: pendingSave.username,
           password: '', // Passed via initialPassword
-          urls: [pendingSave.url]
+          urls: normalizedUrl ? [normalizedUrl] : []
         }
       }
       setSelectedEntry(entry)
@@ -173,7 +176,7 @@ function Main() {
             <Header title={pendingSave ? 'Save Login' : (selectedEntry ? 'Edit Entry' : 'New Entry')} onBack={handleCancelEntry} />
             <EntryForm 
               initialEntry={selectedEntry} 
-              initialPassword={pendingSave && selectedEntry?.login?.urls[0] === pendingSave.url ? pendingSave.password : undefined}
+              initialPassword={pendingSave && selectedEntry?.id === '' ? pendingSave.password : undefined}
               onSave={handleSaveEntry} 
               onCancel={handleCancelEntry} 
             />

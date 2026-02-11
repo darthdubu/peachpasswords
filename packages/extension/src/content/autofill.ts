@@ -8,21 +8,16 @@ function detectForms() {
   
   passwordInputs.forEach(passwordInput => {
     if (passwordInput instanceof HTMLInputElement) {
-      // Check if already processed
-      if (passwordInput.parentElement?.querySelector('.lotus-icon')) return
-
       const form = passwordInput.closest('form') || passwordInput.closest('div') || document.body
-      const usernameInput = findUsernameInput(form, passwordInput)
       
       const type = isSignupField(passwordInput) ? 'signup' : 'login'
       
       if (type === 'signup') {
-        addGeneratorIcon(passwordInput)
-      } else {
-        if (usernameInput && !usernameInput.parentElement?.querySelector('.lotus-icon')) {
-          addIconToInput(usernameInput, 'username')
+        if (!passwordInput.parentElement?.querySelector('.lotus-icon')) {
+          addGeneratorIcon(passwordInput)
         }
-        addIconToInput(passwordInput, 'password')
+      } else {
+        addPeachFormTrigger(form, passwordInput)
       }
     }
   })
@@ -43,7 +38,9 @@ function isSignupField(input: HTMLInputElement): boolean {
 }
 
 function findUsernameInput(container: Element, passwordInput: HTMLInputElement): HTMLInputElement | null {
-  const possibleInputs = container.querySelectorAll('input[type="text"], input[type="email"], input[name*="user"], input[name*="email"], input[name*="login"]')
+  const possibleInputs = container.querySelectorAll(
+    'input[type="text"], input[type="email"], input[type="tel"], input[name*="user" i], input[name*="email" i], input[name*="login" i], input[id*="user" i], input[id*="email" i], input[id*="login" i], input[autocomplete="username"], input[autocomplete="email"]'
+  )
   
   for (const input of possibleInputs) {
     if (input instanceof HTMLInputElement && input !== passwordInput) {
@@ -53,16 +50,11 @@ function findUsernameInput(container: Element, passwordInput: HTMLInputElement):
   return null
 }
 
-function addIconToInput(input: HTMLInputElement, type: 'username' | 'password') {
-  const icon = createIcon('L', '#10b981') // Green for login
-  icon.title = 'Click to fill with Peach'
-  
-  setupIconContainer(input, icon)
-  
-  icon.addEventListener('click', (e) => {
-    e.stopPropagation()
-    handleAutofillClick(input, type)
-  })
+function isInputVisible(input: HTMLInputElement): boolean {
+  const style = window.getComputedStyle(input)
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false
+  const rect = input.getBoundingClientRect()
+  return rect.width > 0 && rect.height > 0
 }
 
 function addGeneratorIcon(input: HTMLInputElement) {
@@ -112,6 +104,27 @@ function setupIconContainer(input: HTMLInputElement, icon: HTMLElement) {
     }
     container.appendChild(icon)
   }
+}
+
+function addPeachFormTrigger(formContainer: Element, passwordInput: HTMLInputElement) {
+  if (!(formContainer instanceof HTMLElement)) return
+  if (formContainer.querySelector('.peach-form-trigger')) return
+
+  const icon = createIcon('P', '#f97316')
+  icon.classList.add('peach-form-trigger')
+  icon.title = 'Open Peach login actions'
+  setupIconContainer(passwordInput, icon)
+
+  icon.addEventListener('click', (e) => {
+    e.stopPropagation()
+    void showPeachFormPopup(formContainer, icon, passwordInput)
+  })
+
+  passwordInput.addEventListener('focus', () => {
+    if (!activePeachPopup) {
+      void showPeachFormPopup(formContainer, icon, passwordInput)
+    }
+  })
 }
 
 // --- Generator UI ---
@@ -223,29 +236,165 @@ function showGeneratorPopup(input: HTMLInputElement, anchor: HTMLElement) {
 
 // --- Autofill Logic ---
 
-async function handleAutofillClick(input: HTMLInputElement, type: 'username' | 'password') {
+let activePeachPopup: HTMLElement | null = null
+let activeCloseHandler: ((e: MouseEvent) => void) | null = null
+
+function closeActivePeachPopup() {
+  if (activePeachPopup) {
+    activePeachPopup.remove()
+    activePeachPopup = null
+  }
+  if (activeCloseHandler) {
+    document.removeEventListener('click', activeCloseHandler)
+    activeCloseHandler = null
+  }
+}
+
+function fillLoginForm(
+  container: Element,
+  passwordInput: HTMLInputElement,
+  username: string,
+  password: string
+) {
+  const usernameInput = findUsernameInput(container, passwordInput)
+  if (usernameInput && isInputVisible(usernameInput) && username) {
+    usernameInput.value = username
+    usernameInput.dispatchEvent(new Event('input', { bubbles: true }))
+    usernameInput.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+
+  if (isInputVisible(passwordInput) && password) {
+    passwordInput.value = password
+    passwordInput.dispatchEvent(new Event('input', { bubbles: true }))
+    passwordInput.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+}
+
+async function showPeachFormPopup(formContainer: Element, anchor: HTMLElement, passwordInput: HTMLInputElement) {
+  closeActivePeachPopup()
+
+  const popup = document.createElement('div')
+  popup.className = 'peach-form-popup'
+  popup.style.cssText = `
+    position: absolute;
+    z-index: 10002;
+    background: white;
+    border: 1px solid #fed7aa;
+    border-radius: 10px;
+    padding: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    min-width: 260px;
+    max-width: 320px;
+    font-family: sans-serif;
+    font-size: 12px;
+    color: #0f172a;
+  `
+
+  popup.innerHTML = `
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;font-weight:600;color:#ea580c;">
+      <span style="width:16px;height:16px;border-radius:9999px;background:#f97316;color:white;display:inline-flex;align-items:center;justify-content:center;font-size:10px;">P</span>
+      Peach
+    </div>
+    <div style="color:#64748b;">Checking saved logins...</div>
+  `
+
+  const formRect = (formContainer as HTMLElement).getBoundingClientRect()
+  const anchorRect = anchor.getBoundingClientRect()
+  const left = Math.max(8, Math.min(window.scrollX + anchorRect.left, window.scrollX + window.innerWidth - 340))
+  popup.style.left = `${left}px`
+  popup.style.top = `${window.scrollY + formRect.bottom + 8}px`
+
+  document.body.appendChild(popup)
+  activePeachPopup = popup
+
+  const pageUrl = window.location.href
+  const currentUsername = findUsernameInput(formContainer, passwordInput)?.value || ''
+  const currentPassword = passwordInput.value || ''
+
   try {
-    const pageUrl = window.location.origin
     const response = await chrome.runtime.sendMessage({
       type: 'REQUEST_CREDENTIALS',
       url: pageUrl
     })
-    
-    if (response.success && response.credentials) {
-      if (type === 'username' && response.credentials.username) {
-        input.value = response.credentials.username
-        input.dispatchEvent(new Event('input', { bubbles: true }))
-      } else if (type === 'password' && response.credentials.password) {
-        input.value = response.credentials.password
-        input.dispatchEvent(new Event('input', { bubbles: true }))
+
+    const hasCredentials = !!(response?.success && response?.credentials)
+    const escapedUser = hasCredentials && response.credentials.username
+      ? String(response.credentials.username)
+      : ''
+
+    popup.innerHTML = `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;font-weight:600;color:#ea580c;">
+        <span style="width:16px;height:16px;border-radius:9999px;background:#f97316;color:white;display:inline-flex;align-items:center;justify-content:center;font-size:10px;">P</span>
+        Peach
+      </div>
+      ${
+        hasCredentials
+          ? `<button id="peach-fill-login" style="width:100%;background:#10b981;color:white;border:none;padding:8px;border-radius:8px;cursor:pointer;font-weight:600;">Fill saved login${escapedUser ? ` (${escapedUser})` : ''}</button>`
+          : `<div style="color:#64748b;margin-bottom:8px;">No saved login found for this site.</div>`
       }
-    } else {
-      // No credentials found - this is expected behavior
-      // TODO: Show "No credentials" tooltip
+      <button id="peach-create-login" style="width:100%;margin-top:${hasCredentials ? '8px' : '0'};background:#f97316;color:white;border:none;padding:8px;border-radius:8px;cursor:pointer;font-weight:600;">Create new login in Peach</button>
+    `
+
+    const fillBtn = popup.querySelector('#peach-fill-login')
+    if (fillBtn && hasCredentials) {
+      fillBtn.addEventListener('click', () => {
+        fillLoginForm(
+          formContainer,
+          passwordInput,
+          response.credentials.username || '',
+          response.credentials.password || ''
+        )
+        closeActivePeachPopup()
+      })
     }
+
+    const createBtn = popup.querySelector('#peach-create-login')
+    createBtn?.addEventListener('click', async () => {
+      await chrome.runtime.sendMessage({
+        type: 'PROMPT_SAVE',
+        data: {
+          url: pageUrl,
+          username: currentUsername,
+          password: currentPassword
+        }
+      })
+
+      await chrome.runtime.sendMessage({ type: 'OPEN_POPUP' }).catch(() => undefined)
+      closeActivePeachPopup()
+    })
   } catch (error) {
-    console.error('Failed to autofill:', error)
+    popup.innerHTML = `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;font-weight:600;color:#ea580c;">
+        <span style="width:16px;height:16px;border-radius:9999px;background:#f97316;color:white;display:inline-flex;align-items:center;justify-content:center;font-size:10px;">P</span>
+        Peach
+      </div>
+      <div style="color:#ef4444;margin-bottom:8px;">Unable to load login suggestions.</div>
+      <button id="peach-create-login" style="width:100%;background:#f97316;color:white;border:none;padding:8px;border-radius:8px;cursor:pointer;font-weight:600;">Create new login in Peach</button>
+    `
+    popup.querySelector('#peach-create-login')?.addEventListener('click', async () => {
+      await chrome.runtime.sendMessage({
+        type: 'PROMPT_SAVE',
+        data: {
+          url: pageUrl,
+          username: currentUsername,
+          password: currentPassword
+        }
+      })
+      await chrome.runtime.sendMessage({ type: 'OPEN_POPUP' }).catch(() => undefined)
+      closeActivePeachPopup()
+    })
+    console.error('Failed to load Peach form popup:', error)
   }
+
+  activeCloseHandler = (e: MouseEvent) => {
+    const target = e.target as Node
+    if (!popup.contains(target) && target !== anchor) {
+      closeActivePeachPopup()
+    }
+  }
+  setTimeout(() => {
+    if (activeCloseHandler) document.addEventListener('click', activeCloseHandler)
+  }, 0)
 }
 
 // --- Save Prompt Logic ---
@@ -263,7 +412,7 @@ document.addEventListener('submit', (e) => {
     chrome.runtime.sendMessage({
       type: 'PROMPT_SAVE',
       data: {
-        url: window.location.origin,
+        url: window.location.href,
         username,
         password
       }

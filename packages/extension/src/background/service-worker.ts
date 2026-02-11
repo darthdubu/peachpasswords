@@ -1,4 +1,5 @@
 import { decrypt, base64ToBuffer } from '../lib/crypto-utils'
+import { urlsMatch } from '../lib/url-match'
 
 const LOCK_ALARM_NAME = 'lotus-auto-lock'
 
@@ -6,7 +7,7 @@ chrome.runtime.onInstalled.addListener(() => {})
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === LOCK_ALARM_NAME) {
-    chrome.storage.session.remove(['masterKey', 'autofillKey', 'pendingSave'])
+    chrome.storage.session.remove(['masterKey', 'masterKeyRaw', 'autofillKey', 'autofillData', 'pendingSave'])
     chrome.action.setBadgeText({ text: '' })
   }
 })
@@ -26,7 +27,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'LOCK_NOW') {
-    chrome.storage.session.remove(['autofillKey', 'pendingSave'])
+    chrome.storage.session.remove(['masterKey', 'masterKeyRaw', 'autofillKey', 'autofillData', 'pendingSave'])
     chrome.action.setBadgeText({ text: '' })
     chrome.alarms.clear(LOCK_ALARM_NAME)
     sendResponse({ success: true })
@@ -36,6 +37,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'STORE_AUTOFILL_KEY') {
     chrome.storage.session.set({ autofillKey: message.key })
     sendResponse({ success: true })
+    return true
+  }
+
+  if (message.type === 'OPEN_POPUP') {
+    if (!chrome.action.openPopup) {
+      sendResponse({ success: false, error: 'openPopup not supported' })
+      return true
+    }
+    chrome.action.openPopup()
+      .then(() => sendResponse({ success: true }))
+      .catch((err) => sendResponse({ success: false, error: err?.message || 'Failed to open popup' }))
     return true
   }
 })
@@ -52,11 +64,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'PROMPT_SAVE') {
+    const timestamp = Date.now()
     // Store pending save in session with timestamp
     chrome.storage.session.set({
       pendingSave: {
         ...message.data,
-        _timestamp: Date.now()
+        _timestamp: timestamp
       }
     })
     // Set badge to indicate action needed
@@ -66,7 +79,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // LOTUS-013: Auto-clear pending save after 5 minutes
     setTimeout(() => {
       chrome.storage.session.get('pendingSave').then((result) => {
-        if (result.pendingSave?._timestamp === message.data._timestamp) {
+        if (result.pendingSave?._timestamp === timestamp) {
           chrome.storage.session.remove('pendingSave')
           chrome.action.setBadgeText({ text: '' })
         }
@@ -92,15 +105,8 @@ async function handleGetCredentials(url: string) {
 
     if (!session.autofillData) return { success: false, error: 'No autofill data' }
 
-    const urlObj = new URL(url)
-    const hostname = urlObj.hostname.toLowerCase()
-
     for (const item of session.autofillData) {
-      if (item.urls.some((u: string) => {
-        try {
-          return new URL(u).hostname.toLowerCase() === hostname
-        } catch { return false }
-      })) {
+      if (item.urls.some((u: string) => urlsMatch(u, url))) {
         const iv = base64ToBuffer(item.iv)
         const ciphertext = base64ToBuffer(item.ciphertext)
         const combined = new Uint8Array(iv.byteLength + ciphertext.byteLength)

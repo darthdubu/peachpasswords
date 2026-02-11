@@ -9,11 +9,13 @@ import { STORAGE_KEYS } from '../../lib/constants'
 import QRCode from 'react-qr-code'
 import { parseCSV } from '../../lib/importers'
 import { EncryptedSettings } from '../../lib/crypto-utils'
-import { hasBiometricCredential, clearBiometricCredential, registerBiometric } from '../../lib/biometric'
+import { hasBiometricCredential, clearBiometricCredential, registerBiometric, getBiometricSupportInfo } from '../../lib/biometric'
+import { hasPin, clearPin, setPin } from '../../lib/pin'
 
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
 
 type SettingsCategory = 'appearance' | 'security' | 'sync' | 'backup' | 'import'
+const LAST_AUTH_METHOD_KEY = 'peach_last_auth_method'
 
 export function Settings() {
   const { lockVault, syncStatus, s3SyncStatus, importEntries, vault, decryptValue, encryptSettingsData, decryptSettingsData, masterKey } = useVault()
@@ -33,6 +35,9 @@ export function Settings() {
   const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState(5)
   const [hasBiometric, setHasBiometric] = useState(false)
   const [isRegisteringBiometric, setIsRegisteringBiometric] = useState(false)
+  const [pinEnabled, setPinEnabled] = useState(false)
+  const [pinInput, setPinInput] = useState('')
+  const [isSettingPin, setIsSettingPin] = useState(false)
   const [pairingToken, setPairingToken] = useState<string | null>(null)
   const [pairingQR, setPairingQR] = useState<string | null>(null)
   const [isPairing, setIsPairing] = useState(false)
@@ -40,35 +45,37 @@ export function Settings() {
   useEffect(() => {
     const loadSettings = async () => {
       const result = await chrome.storage.local.get([STORAGE_KEYS.SETTINGS])
-      if (!result[STORAGE_KEYS.SETTINGS]) return
-
       const settingsData = result[STORAGE_KEYS.SETTINGS]
-
-      if (settingsData.encrypted) {
-        const decrypted = await decryptSettingsData(settingsData.encrypted as EncryptedSettings)
-        if (decrypted) {
-          setServerUrl(decrypted.serverUrl || '')
-          setSyncSecret(decrypted.syncSecret || '')
-          setS3Endpoint(decrypted.s3Endpoint || 'https://s3.fr-par.scw.cloud')
-          setS3Region(decrypted.s3Region || 'fr-par')
-          setS3AccessKey(decrypted.s3AccessKey || '')
-          setS3SecretKey(decrypted.s3SecretKey || '')
-          setS3Bucket(decrypted.s3Bucket || '')
-          setIdleTimeoutMinutes(Number(decrypted.idleTimeoutMinutes) || 5)
+      if (settingsData) {
+        if (settingsData.encrypted) {
+          const decrypted = await decryptSettingsData(settingsData.encrypted as EncryptedSettings)
+          if (decrypted) {
+            setServerUrl(decrypted.serverUrl || '')
+            setSyncSecret(decrypted.syncSecret || '')
+            setS3Endpoint(decrypted.s3Endpoint || 'https://s3.fr-par.scw.cloud')
+            setS3Region(decrypted.s3Region || 'fr-par')
+            setS3AccessKey(decrypted.s3AccessKey || '')
+            setS3SecretKey(decrypted.s3SecretKey || '')
+            setS3Bucket(decrypted.s3Bucket || '')
+            setIdleTimeoutMinutes(Number(decrypted.idleTimeoutMinutes) || 5)
+          }
+        } else {
+          setServerUrl(settingsData.serverUrl || '')
+          setSyncSecret(settingsData.syncSecret || '')
+          setS3Endpoint(settingsData.s3Endpoint || 'https://s3.fr-par.scw.cloud')
+          setS3Region(settingsData.s3Region || 'fr-par')
+          setS3AccessKey(settingsData.s3AccessKey || '')
+          setS3SecretKey(settingsData.s3SecretKey || '')
+          setS3Bucket(settingsData.s3Bucket || '')
+          setIdleTimeoutMinutes(settingsData.idleTimeoutMinutes || 5)
         }
-      } else {
-        setServerUrl(settingsData.serverUrl || '')
-        setSyncSecret(settingsData.syncSecret || '')
-        setS3Endpoint(settingsData.s3Endpoint || 'https://s3.fr-par.scw.cloud')
-        setS3Region(settingsData.s3Region || 'fr-par')
-        setS3AccessKey(settingsData.s3AccessKey || '')
-        setS3SecretKey(settingsData.s3SecretKey || '')
-        setS3Bucket(settingsData.s3Bucket || '')
-        setIdleTimeoutMinutes(settingsData.idleTimeoutMinutes || 5)
       }
       
       const biometricEnabled = await hasBiometricCredential()
       setHasBiometric(biometricEnabled)
+      
+      const pinEnabled = await hasPin()
+      setPinEnabled(pinEnabled)
     }
     loadSettings()
   }, [decryptSettingsData])
@@ -135,18 +142,25 @@ export function Settings() {
     if (!masterKey) return
     setIsRegisteringBiometric(true)
     try {
+      const support = getBiometricSupportInfo()
+      if (!support.supported) {
+        alert(`Touch ID not supported in this context (${support.reason || 'unsupported'}).`)
+        return
+      }
+
       const sessionResult = await chrome.storage.session.get(['masterKeyRaw'])
       if (!sessionResult.masterKeyRaw) {
         alert('Please unlock with password first to enable biometric')
         return
       }
       const rawBytes = new Uint8Array(sessionResult.masterKeyRaw)
-      const success = await registerBiometric(masterKey, rawBytes.buffer)
+      const success = await registerBiometric(masterKey, rawBytes.slice().buffer)
       if (success) {
         setHasBiometric(true)
+        await chrome.storage.local.set({ [LAST_AUTH_METHOD_KEY]: 'biometric' })
         alert('Touch ID enabled successfully!')
       } else {
-        alert('Failed to enable Touch ID')
+        alert('Failed to enable Touch ID. Make sure Touch ID is enabled on your Mac and try again.')
       }
     } catch (e) {
       console.error(e)
@@ -355,9 +369,9 @@ export function Settings() {
                 ) : (
                   <div className="space-y-2">
                     <p className="text-sm text-muted-foreground">Unlock instantly with Touch ID</p>
-                    <Button 
-                      onClick={handleBiometricSetup} 
-                      variant="outline" 
+                    <Button
+                      onClick={handleBiometricSetup}
+                      variant="outline"
                       size="sm"
                       disabled={isRegisteringBiometric || !masterKey}
                     >
@@ -371,7 +385,92 @@ export function Settings() {
                   </div>
                 )}
               </div>
-              
+
+              <div className="pt-4 border-t space-y-4">
+                <h4 className="font-medium">PIN Unlock</h4>
+                {pinEnabled ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">PIN unlock is enabled</p>
+                    <Button
+                      onClick={async () => {
+                        await clearPin()
+                        setPinEnabled(false)
+                      }}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Disable PIN
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {isSettingPin ? (
+                      <div className="space-y-2">
+                        <Input
+                          type="password"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={6}
+                          placeholder="Enter 6-digit PIN"
+                          value={pinInput}
+                          onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                          className="h-9 text-center text-lg tracking-widest"
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={() => {
+                              setIsSettingPin(false)
+                              setPinInput('')
+                            }}
+                            variant="outline"
+                            size="sm"
+                            className="flex-1"
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            onClick={async () => {
+                              if (pinInput.length !== 6) {
+                                alert('PIN must be 6 digits')
+                                return
+                              }
+                              const sessionResult = await chrome.storage.session.get(['masterKeyRaw'])
+                              if (!sessionResult.masterKeyRaw) {
+                                alert('Please unlock with password first to enable PIN')
+                                return
+                              }
+                              const rawBytes = new Uint8Array(sessionResult.masterKeyRaw)
+                              await setPin(pinInput, rawBytes)
+                              setPinEnabled(true)
+                              setIsSettingPin(false)
+                              setPinInput('')
+                              alert('PIN enabled successfully!')
+                            }}
+                            size="sm"
+                            className="flex-1"
+                            disabled={pinInput.length !== 6}
+                          >
+                            Save PIN
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-sm text-muted-foreground">Unlock with a 6-digit PIN</p>
+                        <Button
+                          onClick={() => setIsSettingPin(true)}
+                          variant="outline"
+                          size="sm"
+                          disabled={!masterKey}
+                        >
+                          Enable PIN
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <Button onClick={handleSave} variant="outline" size="sm" className="w-full">
                 Save Security Settings
               </Button>
@@ -451,6 +550,9 @@ export function Settings() {
                     className="flex-1"
                     onClick={async () => {
                       if (isPairing) {
+                        if (pairingToken) {
+                          await chrome.storage.session.remove(`pairing_${pairingToken}`)
+                        }
                         setIsPairing(false)
                         setPairingToken(null)
                         setPairingQR(null)
