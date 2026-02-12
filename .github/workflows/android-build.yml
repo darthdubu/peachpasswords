@@ -1,0 +1,142 @@
+name: Android Build and Release
+
+on:
+  push:
+    tags:
+      - 'android-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., 0.2.0)'
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      
+      - name: Grant execute permission for gradlew
+        run: chmod +x packages/android-app/gradlew
+      
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+      
+      - name: Decode keystore
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          echo "$SIGNING_KEY" | base64 -d > packages/android-app/keystore.jks
+      
+      - name: Calculate version code
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF_NAME#android-v}
+          fi
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+          VERSION_CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "Building version $VERSION (code: $VERSION_CODE)"
+      
+      - name: Build Release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          cd packages/android-app
+          ./gradlew :app:assembleRelease \
+            -Pandroid.injected.signing.store.file=../keystore.jks \
+            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$KEY_PASSWORD \
+            -Pandroid.injected.version.code=${{ steps.version.outputs.version_code }} \
+            -Pandroid.injected.version.name=${{ steps.version.outputs.version }} \
+            --no-daemon \
+            --parallel \
+            --build-cache
+      
+      - name: Calculate checksums
+        run: |
+          cd packages/android-app/app/build/outputs/apk/release
+          sha256sum *.apk > checksums.txt
+          cat checksums.txt
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: packages/android-app/app/build/outputs/apk/release/*.apk
+      
+      - name: Create Release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || format('android-v{0}', github.event.inputs.version) }}
+          name: Lotus Android v${{ steps.version.outputs.version }}
+          body: |
+            ## Lotus Android v${{ steps.version.outputs.version }}
+            
+            ### Features
+            - Full password manager functionality
+            - Secure vault with Argon2id encryption
+            - Biometric & PIN authentication
+            - Scaleway S3 sync support
+            - Auto-fill service
+            - Built-in updater
+            
+            ### Installation
+            1. Download `app-release.apk` below
+            2. Enable "Install from unknown sources" if prompted
+            3. Open the app and create/unlock your vault
+            
+            ### Scaleway S3 Sync Setup
+            1. Go to Settings → Sync
+            2. Enter your Scaleway S3 credentials:
+               - Endpoint: `s3.fr-par.scw.cloud` (or your region)
+               - Bucket: Your bucket name
+               - Access Key: Your Scaleway API key
+               - Secret Key: Your Scaleway API secret
+            3. Enable auto-sync
+            
+            ### Checksums
+            See `checksums.txt` in the release assets.
+          files: |
+            packages/android-app/app/build/outputs/apk/release/*.apk
+            packages/android-app/app/build/outputs/apk/release/checksums.txt
+          draft: false
+          prerelease: false
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f packages/android-app/keystore.jks
