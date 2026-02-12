@@ -43,7 +43,7 @@ class VaultRepository(
       fromVersion = current.version,
       targetVersion = current.version + 1,
       backupCiphertext = currentPayload,
-      backupAad = null,
+      backupAad = "",
       backupSyncVersion = current.syncVersion
     )
     return runCatching {

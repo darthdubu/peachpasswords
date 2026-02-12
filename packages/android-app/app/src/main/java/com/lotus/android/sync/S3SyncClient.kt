@@ -76,8 +76,7 @@ class S3SyncClient(private val context: Context) {
                     bucket = settings.bucket
                     key = this@S3SyncClient.key
                 }) { resp ->
-                    val stream = resp.body?.toInputStream() ?: throw Exception("Empty response")
-                    stream.readBytes()
+                    resp.body?.readAllBytes() ?: throw Exception("Empty response")
                 }
                 
                 val payloadJson = String(responseBytes, Charsets.UTF_8)
