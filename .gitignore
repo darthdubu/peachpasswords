@@ -10,3 +10,15 @@ certs/
 data/
 coverage
 .vscode
+/.gradle
+**/build/
+local.properties
+
+# Android signing keystore files (CRITICAL - never commit!)
+*.keystore
+*.jks
+keystore-info.txt
+keystore.properties
+packages/android-app/lotus-release.keystore
+packages/android-app/keystore.jks
+packages/android-app/keystore-info.txt
