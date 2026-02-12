@@ -17,7 +17,6 @@ export async function vaultRoutes(fastify: FastifyInstance) {
     }
     
     return {
-      data: vault.data, 
       blob: vault.data.toString('base64'),
       version: vault.version,
       last_modified: vault.last_modified
@@ -34,22 +33,25 @@ export async function vaultRoutes(fastify: FastifyInstance) {
     if (currentVault && currentVault.version >= version) {
       return reply.status(409).send({ 
         error: "Conflict", 
-        serverVersion: currentVault.version 
+        serverVersion: currentVault.version,
+        blob: currentVault.data.toString('base64'),
+        version: currentVault.version
       });
     }
 
     const buffer = Buffer.from(blob, 'base64');
+    const dataHash = db.computeDataHash(buffer);
     const now = Date.now();
 
     if (currentVault) {
       await db.run(
-        "UPDATE vaults SET data = ?, version = ?, last_modified = ? WHERE id = ?",
-        [buffer, version, now, vaultId]
+        "UPDATE vaults SET data = ?, data_hash = ?, version = ?, last_modified = ? WHERE id = ?",
+        [buffer, dataHash, version, now, vaultId]
       );
     } else {
       await db.run(
-        "INSERT INTO vaults (id, data, version, last_modified) VALUES (?, ?, ?, ?)",
-        [vaultId, buffer, version, now]
+        "INSERT INTO vaults (id, data, data_hash, version, last_modified) VALUES (?, ?, ?, ?, ?)",
+        [vaultId, buffer, dataHash, version, now]
       );
     }
 

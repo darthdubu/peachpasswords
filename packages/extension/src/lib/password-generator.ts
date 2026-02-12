@@ -1,3 +1,5 @@
+import { logSecurityEvent } from './security-events'
+
 export interface PasswordOptions {
   length: number
   useNumbers: boolean
@@ -11,6 +13,13 @@ export function generatePassword(options: PasswordOptions = {
   useSymbols: true,
   useUppercase: true
 }): string {
+  // Log password generator usage (fire and forget)
+  void logSecurityEvent('password-generator-used', 'info', {
+    length: options.length,
+    useNumbers: options.useNumbers,
+    useSymbols: options.useSymbols,
+    useUppercase: options.useUppercase
+  })
   const charset = {
     lower: 'abcdefghijklmnopqrstuvwxyz',
     upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',

@@ -29,4 +29,14 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
   },
+  // Worker configuration for Web Worker support
+  worker: {
+    format: 'es',
+    rollupOptions: {
+      output: {
+        entryFileNames: 'workers/[name]-[hash].js',
+        chunkFileNames: 'workers/chunks/[name]-[hash].js',
+      },
+    },
+  },
 })

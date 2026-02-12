@@ -297,6 +297,14 @@ class CryptoEngine(private val context: Context) {
         return String(decrypt(payload, key), Charsets.UTF_8)
     }
 
+    fun parsePayload(payloadJson: String): EncryptedPayload {
+        return json.decodeFromString(payloadJson)
+    }
+
+    fun serializePayload(payloadJson: String): String {
+        return payloadJson
+    }
+
     /**
      * Compute vault integrity hash
      * Matches extension's computeVaultHash

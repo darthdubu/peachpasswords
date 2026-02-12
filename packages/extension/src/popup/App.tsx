@@ -243,7 +243,7 @@ function Main() {
   const handleSave = useCallback(() => { if (pendingSave) clearPendingSave(); setView('list'); setSelectedEntry(null); }, [pendingSave, clearPendingSave])
   const handleCancel = useCallback(() => { if (pendingSave) clearPendingSave(); setView('list'); }, [clearPendingSave, pendingSave])
   const handleDelete = useCallback(async () => {
-    if (selectedEntry && confirm('Move to trash?')) {
+    if (selectedEntry) {
       await deleteEntry(selectedEntry.id)
       setView('list')
       setSelectedEntry(null)

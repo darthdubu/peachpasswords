@@ -16,6 +16,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayInputStream
+import aws.smithy.kotlin.runtime.content.ByteStream
+import aws.smithy.kotlin.runtime.collections.Attributes
 
 class S3SyncClient(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -25,10 +27,15 @@ class S3SyncClient(private val context: Context) {
     data class SyncResult(
         val success: Boolean,
         val vault: Vault?,
-        val conflicts: List<ThreeWayMerge.MergeConflict> = emptyList(),
+        val conflicts: List<MergeConflict> = emptyList(),
         val message: String
     )
-    
+
+    data class MergeConflict(
+        val entryId: String,
+        val entryName: String
+    )
+
     data class RemoteInfo(
         val etag: String?,
         val version: Long,
@@ -65,14 +72,15 @@ class S3SyncClient(private val context: Context) {
     suspend fun pullRemote(settings: S3Settings, masterKey: ByteArray): Result<Vault> = withContext(Dispatchers.IO) {
         runCatching {
             createS3Client(settings).use { s3 ->
-                val response = s3.getObject(GetObjectRequest {
+                val responseBytes = s3.getObject(GetObjectRequest {
                     bucket = settings.bucket
                     key = this@S3SyncClient.key
                 }) { resp ->
-                    resp.body?.readAllBytes() ?: throw Exception("Empty response")
+                    val stream = resp.body?.toInputStream() ?: throw Exception("Empty response")
+                    stream.readBytes()
                 }
                 
-                val payloadJson = String(response, Charsets.UTF_8)
+                val payloadJson = String(responseBytes, Charsets.UTF_8)
                 val payload = json.decodeFromString<EncryptedSyncPayload>(payloadJson)
                 
                 val vaultKey = crypto.deriveSubKey(masterKey, "vault-main")
@@ -93,20 +101,23 @@ class S3SyncClient(private val context: Context) {
                 val payload = EncryptedSyncPayload(
                     blob = encrypted,
                     version = vault.syncVersion,
-                    salt = salt.toList(),
+                    salt = salt.map { it.toInt() },
                     timestamp = System.currentTimeMillis()
                 )
-                
+
+                val payloadBytes = json.encodeToString(payload).toByteArray(Charsets.UTF_8)
+
                 s3.putObject(PutObjectRequest {
                     bucket = settings.bucket
                     key = this@S3SyncClient.key
-                    body = ByteArrayInputStream(json.encodeToString(payload).toByteArray(Charsets.UTF_8))
+                    body = ByteStream.fromBytes(payloadBytes)
                     metadata = mapOf(
                         "version" to vault.syncVersion.toString(),
                         "timestamp" to System.currentTimeMillis().toString(),
                         "client" to "lotus-android"
                     )
                 })
+                Unit
             }
         }
     }
@@ -145,7 +156,9 @@ class S3SyncClient(private val context: Context) {
             SyncResult(
                 success = true,
                 vault = mergedVault,
-                conflicts = mergeResult.conflicts,
+                conflicts = mergeResult.conflicts.map { 
+                    MergeConflict(it.entryId, it.entryName) 
+                },
                 message = if (mergeResult.conflicts.isEmpty()) "Sync successful" else "Sync with ${mergeResult.conflicts.size} conflicts"
             )
         } catch (e: Exception) {
@@ -159,10 +172,12 @@ class S3SyncClient(private val context: Context) {
             endpointUrl = Url.parse(settings.displayEndpoint)
             forcePathStyle = settings.pathStyle
             credentialsProvider = object : CredentialsProvider {
-                override suspend fun getCredentials() = Credentials(
-                    accessKeyId = settings.accessKey,
-                    secretAccessKey = settings.secretKey
-                )
+                override suspend fun resolve(attributes: Attributes): Credentials {
+                    return Credentials(
+                        accessKeyId = settings.accessKey,
+                        secretAccessKey = settings.secretKey
+                    )
+                }
             }
         }
     }

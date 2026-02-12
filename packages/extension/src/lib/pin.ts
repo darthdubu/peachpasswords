@@ -1,3 +1,5 @@
+import { logSecurityEvent } from './security-events'
+
 const PIN_STORAGE_KEY = 'peach_pin_data'
 const PIN_ATTEMPT_STORAGE_KEY = 'peach_pin_attempts'
 const PIN_MAX_ATTEMPTS_BEFORE_LOCK = 5
@@ -11,6 +13,15 @@ interface PinData {
 interface PinAttemptData {
   failedAttempts: number
   lockUntil: number
+}
+
+function secureWipe(buffer: ArrayBuffer | Uint8Array | null | undefined): void {
+  if (!buffer) return
+  if (buffer instanceof ArrayBuffer) {
+    new Uint8Array(buffer).fill(0)
+    return
+  }
+  buffer.fill(0)
 }
 
 function toArrayBuffer(view: Uint8Array): ArrayBuffer {
@@ -50,10 +61,11 @@ export async function setPin(pin: string, rawMasterKey: Uint8Array): Promise<voi
   const key = await deriveKeyFromPin(pin, salt)
   
   const iv = crypto.getRandomValues(new Uint8Array(12))
+  const rawCopy = new Uint8Array(rawMasterKey)
   const encrypted = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: iv.buffer as ArrayBuffer },
     key,
-    toArrayBuffer(rawMasterKey)
+    toArrayBuffer(rawCopy)
   )
   
   const combined = new Uint8Array(iv.length + encrypted.byteLength)
@@ -67,6 +79,10 @@ export async function setPin(pin: string, rawMasterKey: Uint8Array): Promise<voi
   
   await chrome.storage.local.set({ [PIN_STORAGE_KEY]: pinData })
   await clearPinLockout()
+  secureWipe(rawCopy)
+  secureWipe(iv)
+  secureWipe(salt)
+  await logSecurityEvent('pin-auth-success', 'info', { action: 'pin-set' })
 }
 
 export async function decryptMasterKeyWithPin(pin: string): Promise<Uint8Array | null> {
@@ -87,9 +103,17 @@ export async function decryptMasterKeyWithPin(pin: string): Promise<Uint8Array |
       key,
       toArrayBuffer(ciphertext)
     )
-    return new Uint8Array(decrypted)
+    const decryptedBytes = new Uint8Array(decrypted)
+    const safeCopy = new Uint8Array(decryptedBytes)
+    secureWipe(decryptedBytes)
+    return safeCopy
   } catch {
     return null
+  } finally {
+    secureWipe(salt)
+    secureWipe(combined)
+    secureWipe(iv)
+    secureWipe(ciphertext)
   }
 }
 
@@ -146,6 +170,14 @@ export async function recordFailedPinAttempt(): Promise<{ isLocked: boolean; rem
       failedAttempts,
       lockUntil
     }
+  })
+
+  // Log security event for failed PIN attempt
+  const severity = failedAttempts >= PIN_MAX_ATTEMPTS_BEFORE_LOCK ? 'warning' : 'info'
+  await logSecurityEvent('pin-auth-failure', severity, { 
+    failedAttempts,
+    isLocked: lockDurationMs > 0,
+    remainingMs: lockDurationMs
   })
 
   return {

@@ -1,0 +1,80 @@
+name: Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag (example: android-v0.2.0)"
+        required: true
+        type: string
+      release_notes:
+        description: "Optional release notes markdown"
+        required: false
+        type: string
+  push:
+    tags:
+      - "android-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Assemble release APK
+        working-directory: packages/android-app
+        run: ./gradlew :app:assembleRelease
+
+      - name: Collect release artifact
+        run: |
+          mkdir -p artifacts
+          cp "packages/android-app/app/build/outputs/apk/release/app-release.apk" "artifacts/lotus-android-release.apk"
+
+      - name: Resolve release tag
+        id: release_tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release notes
+        id: release_notes
+        run: |
+          if [ -n "${{ github.event.inputs.release_notes }}" ]; then
+            NOTES="${{ github.event.inputs.release_notes }}"
+          else
+            NOTES=$'## Summary\n- Android APK built from `${{ github.sha }}`.\n- Install from the in-app Updates tab or this release asset.\n\n## Recent changes\n'
+            LOG=$(git log -n 20 --pretty=format:'- %s (%h)')
+            NOTES="${NOTES}${LOG}"
+          fi
+          {
+            echo "value<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.value }}
+          name: Lotus Android ${{ steps.release_tag.outputs.value }}
+          body: ${{ steps.release_notes.outputs.value }}
+          files: artifacts/lotus-android-release.apk

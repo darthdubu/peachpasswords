@@ -231,6 +231,11 @@ function createIconSVG(): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   svg.setAttribute('viewBox', '0 0 24 24')
   svg.setAttribute('fill', 'currentColor')
+  svg.setAttribute('width', '12')
+  svg.setAttribute('height', '12')
+  svg.style.width = '12px'
+  svg.style.height = '12px'
+  svg.style.display = 'block'
   
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
   path.setAttribute('d', 'M12 2C8.5 2 6 4.5 6 7c0 1.5.5 2.5 1.5 3.5-1 1-2.5 2.5-2.5 5v3c0 1.5 1 2.5 2.5 2.5h9c1.5 0 2.5-1 2.5-2.5v-3c0-2.5-1.5-4-2.5-5C17.5 9.5 18 8.5 18 7c0-2.5-2.5-5-6-5zm0 2c2 0 3.5 1.5 3.5 3S14 10 12 10 8.5 8.5 8.5 7s1.5-3 3.5-3z')

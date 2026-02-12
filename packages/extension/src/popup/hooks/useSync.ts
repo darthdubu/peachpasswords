@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Vault } from '@lotus/shared'
 import { STORAGE_KEYS } from '../../lib/constants'
-import { bufferToBase64, base64ToBuffer, decrypt, deriveSubKey, decryptSettings, EncryptedSettings } from '../../lib/crypto-utils'
+import { bufferToBase64, base64ToBuffer, decrypt, deriveSubKey, decryptSettings, EncryptedSettings, assertEncryptedBlobPayload } from '../../lib/crypto-utils'
+import { appendSyncEvent } from '../../lib/sync-observability'
+import { clearSyncOperationQueue, getSyncOperationQueue } from '../../lib/sync-ops'
+import { threeWayMerge } from '../../lib/three-way-merge'
+import { appendUnresolvedConflicts } from '../../lib/sync-conflicts'
 
 function generateNonce(): string {
   const timestamp = Date.now().toString(36)
@@ -16,15 +20,8 @@ interface SyncSettings {
   syncSecret?: string
 }
 
-interface QueuedOperation {
-  type: 'push' | 'pull'
-  timestamp: number
-  retryCount: number
-}
-
 const MAX_RETRIES = 3
 const RETRY_DELAY_BASE = 1000
-const OFFLINE_QUEUE_KEY = 'lotus-sync-queue'
 
 export function useSync(
   vault: Vault | null, 
@@ -37,33 +34,6 @@ export function useSync(
   const [syncError, setSyncError] = useState<string | null>(null)
   const isSyncing = useRef(false)
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const offlineQueue = useRef<QueuedOperation[]>([])
-
-  useEffect(() => {
-    chrome.storage.local.get(OFFLINE_QUEUE_KEY).then(result => {
-      if (result[OFFLINE_QUEUE_KEY]) {
-        offlineQueue.current = result[OFFLINE_QUEUE_KEY]
-      }
-    })
-  }, [])
-
-  const saveQueue = useCallback(async () => {
-    await chrome.storage.local.set({ [OFFLINE_QUEUE_KEY]: offlineQueue.current })
-  }, [])
-
-  const processOfflineQueue = useCallback(async () => {
-    if (offlineQueue.current.length === 0) return
-    
-    const queue = [...offlineQueue.current]
-    offlineQueue.current = []
-    await saveQueue()
-    
-    for (const op of queue) {
-      if (op.type === 'push') {
-        await syncWithRetry()
-      }
-    }
-  }, [])
 
   const syncWithRetry = useCallback(async (retryCount = 0): Promise<boolean> => {
     if (!vault || !masterKey || isSyncing.current) return false
@@ -87,12 +57,12 @@ export function useSync(
 
     isSyncing.current = true
     setSyncError(null)
+    await appendSyncEvent('sync-start', 'Starting server sync')
     
     try {
       if (!navigator.onLine) {
         setSyncStatus('offline')
-        offlineQueue.current.push({ type: 'push', timestamp: Date.now(), retryCount: 0 })
-        await saveQueue()
+        await appendSyncEvent('sync-queued', 'Offline: queued for replay', 'warning')
         return false
       }
 
@@ -121,14 +91,17 @@ export function useSync(
         })
         if (!vaultRes.ok) throw new Error('Failed to fetch vault')
         
-        const { blob } = await vaultRes.json()
+        const remotePayload = await vaultRes.json()
+        assertEncryptedBlobPayload(remotePayload)
         
-        const encryptedBuffer = base64ToBuffer(blob)
+        const encryptedBuffer = base64ToBuffer(remotePayload.blob)
         const vaultKey = await deriveSubKey(masterKey, 'vault-main', ['encrypt', 'decrypt'])
         const decryptedData = await decrypt(vaultKey, encryptedBuffer)
-        const vaultData = JSON.parse(new TextDecoder().decode(decryptedData))
+        const vaultData = JSON.parse(new TextDecoder().decode(decryptedData)) as Vault
         
         await onPull(vaultData)
+        await chrome.storage.local.set({ [STORAGE_KEYS.SYNC_BASE]: vaultData })
+        await appendSyncEvent('sync-pull', `Pulled server v${remotePayload.version}`)
       } else if (vault.syncVersion > serverVersion) {
         const stored = await chrome.storage.local.get(['vault'])
         if (stored.vault) {
@@ -147,7 +120,27 @@ export function useSync(
              })
              
              if (!pushRes.ok) {
-               throw new Error(`Push failed: ${pushRes.status}`)
+               if (pushRes.status === 409) {
+                 const conflict = await pushRes.json()
+                 assertEncryptedBlobPayload(conflict)
+                 const vaultKey = await deriveSubKey(masterKey, 'vault-main', ['encrypt', 'decrypt'])
+                 const remoteDecrypted = await decrypt(vaultKey, base64ToBuffer(conflict.blob))
+                 const remoteVault = JSON.parse(new TextDecoder().decode(remoteDecrypted)) as Vault
+                 const baseResult = await chrome.storage.local.get(STORAGE_KEYS.SYNC_BASE)
+                 const baseVault = (baseResult[STORAGE_KEYS.SYNC_BASE] as Vault | undefined) ?? vault
+                 const merged = await threeWayMerge(vault, remoteVault, baseVault)
+                 await appendSyncEvent('sync-merge', `3-way merge completed (${merged.conflicts.length} conflicts)`, merged.conflicts.length ? 'warning' : 'info')
+                 if (merged.conflicts.length > 0) {
+                   await appendSyncEvent('sync-conflict', `${merged.conflicts.length} unresolved conflicts`, 'warning')
+                  await appendUnresolvedConflicts('server', merged.conflicts)
+                 }
+                 await onPull(merged.vault)
+               } else {
+                 throw new Error(`Push failed: ${pushRes.status}`)
+               }
+             } else {
+               await appendSyncEvent('sync-push', `Pushed server v${vault.syncVersion}`)
+               await chrome.storage.local.set({ [STORAGE_KEYS.SYNC_BASE]: vault })
              }
         }
       }
@@ -155,8 +148,8 @@ export function useSync(
       setLastSyncTime(Date.now())
       setSyncStatus('connected')
       setSyncError(null)
-      
-      await processOfflineQueue()
+      await clearSyncOperationQueue()
+      await appendSyncEvent('sync-success', 'Server sync completed')
       
       return true
     } catch (e) {
@@ -166,9 +159,7 @@ export function useSync(
       if (!navigator.onLine || errorMessage.includes('fetch') || errorMessage.includes('network')) {
         setSyncStatus('offline')
         setSyncError('Working offline - changes will sync when connection is restored')
-        
-        offlineQueue.current.push({ type: 'push', timestamp: Date.now(), retryCount })
-        await saveQueue()
+        await appendSyncEvent('sync-queued', 'Network unavailable, keeping queue', 'warning')
       } else if (retryCount < MAX_RETRIES) {
         const delay = RETRY_DELAY_BASE * Math.pow(2, retryCount)
         setSyncError(`Sync failed, retrying in ${delay/1000}s...`)
@@ -183,22 +174,46 @@ export function useSync(
       } else {
         setSyncStatus('error')
         setSyncError(errorMessage)
+        await appendSyncEvent('sync-error', errorMessage, 'error')
       }
       
       return false
     } finally {
       isSyncing.current = false
     }
-  }, [vault, masterKey, onPull, processOfflineQueue, saveQueue])
+  }, [vault, masterKey, onPull])
 
   const sync = useCallback(() => syncWithRetry(0), [syncWithRetry])
 
+  // Track last triggered sync version to prevent loops
+  const lastTriggeredSyncVersionRef = useRef<number>(0)
+  const lastSyncStatusRef = useRef(syncStatus)
+  
+  useEffect(() => {
+    lastSyncStatusRef.current = syncStatus
+  }, [syncStatus])
+  
   // Initial sync and auto-sync on change
   useEffect(() => {
-    if (syncStatus === 'connected') {
-      sync()
+    if (syncStatus !== 'connected') return
+    if (!vault) return
+    // Prevent triggering sync multiple times for the same version
+    if (vault.syncVersion === lastTriggeredSyncVersionRef.current) return
+    lastTriggeredSyncVersionRef.current = vault.syncVersion
+    sync()
+  }, [syncStatus, vault?.syncVersion])  // Removed sync from deps to prevent loops
+
+  useEffect(() => {
+    const replay = async () => {
+      if (!masterKey || !vault) return
+      const queue = await getSyncOperationQueue()
+      if (queue.length === 0) return
+      await appendSyncEvent('sync-start', `Replaying ${queue.length} queued operations`)
+      await syncWithRetry(0)
     }
-  }, [syncStatus, vault?.syncVersion, sync])
+    void replay()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterKey, vault?.syncVersion])  // syncWithRetry removed to prevent loops - function uses refs internally
 
   useEffect(() => {
     if (!masterKey) {
@@ -212,7 +227,13 @@ export function useSync(
 
     const connect = async () => {
       const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS)
-      const { serverUrl, syncSecret } = result[STORAGE_KEYS.SETTINGS] || {}
+      let settings: SyncSettings = {}
+      if (result[STORAGE_KEYS.SETTINGS]?.encrypted) {
+        settings = (await decryptSettings(masterKey, result[STORAGE_KEYS.SETTINGS].encrypted as EncryptedSettings)) || {}
+      } else {
+        settings = result[STORAGE_KEYS.SETTINGS] || {}
+      }
+      const { serverUrl, syncSecret } = settings
 
       if (!serverUrl || !syncSecret) return
 

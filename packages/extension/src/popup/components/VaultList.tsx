@@ -192,7 +192,7 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
                   entry={entry} 
                   index={index}
                   onRestore={() => restoreEntry(entry.id)}
-                  onDelete={() => { if (confirm('Permanently delete?')) permanentlyDeleteEntry(entry.id); }}
+                  onDelete={() => permanentlyDeleteEntry(entry.id)}
                 />
               ))
             )}
@@ -321,6 +321,7 @@ function TrashItem({ entry, index, onRestore, onDelete }: {
 }) {
   const Icon = getIconForType(entry.type)
   const colorClass = getTypeColor(entry.type)
+  const [showConfirm, setShowConfirm] = useState(false)
   
   return (
     <motion.div
@@ -339,18 +340,38 @@ function TrashItem({ entry, index, onRestore, onDelete }: {
         </p>
       </div>
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button 
-          onClick={onRestore} 
-          className="px-2.5 py-1 text-[10px] font-medium text-primary hover:bg-primary/10 rounded transition-colors"
-        >
-          Restore
-        </button>
-        <button 
-          onClick={onDelete} 
-          className="px-2.5 py-1 text-[10px] font-medium text-red-400 hover:bg-red-500/10 rounded transition-colors"
-        >
-          Delete
-        </button>
+        {!showConfirm ? (
+          <>
+            <button 
+              onClick={onRestore} 
+              className="px-2.5 py-1 text-[10px] font-medium text-primary hover:bg-primary/10 rounded transition-colors"
+            >
+              Restore
+            </button>
+            <button 
+              onClick={() => setShowConfirm(true)} 
+              className="px-2.5 py-1 text-[10px] font-medium text-red-400 hover:bg-red-500/10 rounded transition-colors"
+            >
+              Delete
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="text-[10px] text-white/60 mr-1">Permanently delete?</span>
+            <button 
+              onClick={() => setShowConfirm(false)} 
+              className="px-2.5 py-1 text-[10px] font-medium text-white/60 hover:bg-white/10 rounded transition-colors"
+            >
+              Cancel
+            </button>
+            <button 
+              onClick={() => { setShowConfirm(false); onDelete(); }} 
+              className="px-2.5 py-1 text-[10px] font-medium text-red-400 hover:bg-red-500/10 rounded transition-colors"
+            >
+              Confirm
+            </button>
+          </>
+        )}
       </div>
     </motion.div>
   )

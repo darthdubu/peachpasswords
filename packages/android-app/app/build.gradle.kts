@@ -4,7 +4,7 @@ plugins {
   id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-val updateRepo = (project.findProperty("LOTUS_UPDATE_REPO") as String?) ?: "june/Lotus"
+val updateRepo = (project.findProperty("LOTUS_UPDATE_REPO") as String?) ?: "darthdubu/peachpasswords"
 
 android {
   namespace = "com.lotus.android"

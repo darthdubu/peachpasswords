@@ -19,7 +19,8 @@ class PinManager(
 
   fun setPin(pin: String) {
     val salt = ByteArray(16).also(random::nextBytes)
-    val derived = cryptoEngine.deriveMasterKey(pin.toCharArray(), salt, rounds = 120_000)
+    val derivedResult = cryptoEngine.deriveMasterKey(pin, salt)
+    val derived = derivedResult.key
     val digest = MessageDigest.getInstance("SHA-256").digest(derived)
     store.write(PIN_SALT_KEY, Base64.encodeToString(salt, Base64.NO_WRAP))
     store.write(PIN_HASH_KEY, Base64.encodeToString(digest, Base64.NO_WRAP))
@@ -29,7 +30,8 @@ class PinManager(
   fun verifyPin(pin: String): Boolean {
     val salt = store.read(PIN_SALT_KEY)?.let { Base64.decode(it, Base64.DEFAULT) } ?: return false
     val expected = store.read(PIN_HASH_KEY) ?: return false
-    val derived = cryptoEngine.deriveMasterKey(pin.toCharArray(), salt, rounds = 120_000)
+    val derivedResult = cryptoEngine.deriveMasterKey(pin, salt)
+    val derived = derivedResult.key
     val digest = MessageDigest.getInstance("SHA-256").digest(derived)
     val actual = Base64.encodeToString(digest, Base64.NO_WRAP)
     cryptoEngine.wipe(derived)

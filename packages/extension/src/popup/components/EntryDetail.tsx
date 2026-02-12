@@ -25,6 +25,7 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps) {
   const [copiedField, setCopiedField] = useState<CopyField | null>(null)
   const [totpCode, setTotpCode] = useState('')
   const [totpRemaining, setTotpRemaining] = useState(0)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const passwordRevealTimerRef = useRef<NodeJS.Timeout | null>(null)
   const cardNumberRevealTimerRef = useRef<NodeJS.Timeout | null>(null)
   const cvvRevealTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -138,6 +139,7 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps) {
     setShowPassword(false)
     setShowCardNumber(false)
     setShowCvv(false)
+    setShowDeleteConfirm(false)
     clearRevealTimer('password')
     clearRevealTimer('cardNumber')
     clearRevealTimer('cvv')
@@ -174,12 +176,26 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps) {
           <p className="text-xs text-white/40 capitalize">{entry.type}</p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={onEdit} className="h-8 border-white/10 text-white/70 hover:text-white hover:bg-white/[0.05]">
-            <Icons.settings className="h-3.5 w-3.5 mr-1" />Edit
-          </Button>
-          <Button size="sm" variant="destructive" onClick={onDelete} className="h-8 bg-red-500/10 hover:bg-red-500/20 text-red-400 border-red-500/30">
-            <Icons.trash className="h-3.5 w-3.5 mr-1" />Delete
-          </Button>
+          {!showDeleteConfirm ? (
+            <>
+              <Button size="sm" variant="outline" onClick={onEdit} className="h-8 border-white/10 text-white/70 hover:text-white hover:bg-white/[0.05]">
+                <Icons.settings className="h-3.5 w-3.5 mr-1" />Edit
+              </Button>
+              <Button size="sm" variant="destructive" onClick={() => setShowDeleteConfirm(true)} className="h-8 bg-red-500/10 hover:bg-red-500/20 text-red-400 border-red-500/30">
+                <Icons.trash className="h-3.5 w-3.5 mr-1" />Delete
+              </Button>
+            </>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-white/60">Move to trash?</span>
+              <Button size="sm" variant="outline" onClick={() => setShowDeleteConfirm(false)} className="h-8 border-white/10 text-white/70 hover:text-white hover:bg-white/[0.05]">
+                Cancel
+              </Button>
+              <Button size="sm" variant="destructive" onClick={onDelete} className="h-8 bg-red-500/20 hover:bg-red-500/30 text-red-400 border-red-500/40">
+                <Icons.trash className="h-3.5 w-3.5 mr-1" />Confirm
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 

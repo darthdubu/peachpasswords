@@ -19,8 +19,7 @@ class VaultRepository(
 
   fun readVault(masterKey: ByteArray): Vault? {
     val payload = secureStore.read(VAULT_BLOB_KEY) ?: return null
-    val aad = secureStore.read(VAULT_AAD_KEY) ?: buildVaultAad(syncVersion = 0)
-    val plain = cryptoEngine.decryptUtf8(cryptoEngine.parsePayload(payload), masterKey, aad)
+    val plain = cryptoEngine.decryptUtf8(payload, masterKey)
     return json.decodeFromString(Vault.serializer(), plain)
   }
 
@@ -28,11 +27,9 @@ class VaultRepository(
     val normalized = vault.copy(
       contentHash = cryptoEngine.computeIntegrityHash(vault.entries.map(VaultEntry::id), vault.syncVersion)
     )
-    val aad = buildVaultAad(normalized.syncVersion)
     val serialized = json.encodeToString(Vault.serializer(), normalized)
-    val payload = cryptoEngine.encryptUtf8(serialized, masterKey, aad)
-    secureStore.write(VAULT_BLOB_KEY, cryptoEngine.serializePayload(payload))
-    secureStore.write(VAULT_AAD_KEY, aad)
+    val payload = cryptoEngine.encryptUtf8(serialized, masterKey)
+    secureStore.write(VAULT_BLOB_KEY, payload)
   }
 
   fun migrateWithRecovery(
@@ -40,14 +37,13 @@ class VaultRepository(
     masterKey: ByteArray,
     migrate: (Vault) -> Vault
   ): Vault {
-    val currentAad = buildVaultAad(current.syncVersion)
     val currentSerialized = json.encodeToString(Vault.serializer(), current)
-    val currentPayload = cryptoEngine.encryptUtf8(currentSerialized, masterKey, currentAad)
+    val currentPayload = cryptoEngine.encryptUtf8(currentSerialized, masterKey)
     migrationManager.beginMigration(
       fromVersion = current.version,
       targetVersion = current.version + 1,
-      backupCiphertext = cryptoEngine.serializePayload(currentPayload),
-      backupAad = currentAad,
+      backupCiphertext = currentPayload,
+      backupAad = null,
       backupSyncVersion = current.syncVersion
     )
     return runCatching {
@@ -58,14 +54,11 @@ class VaultRepository(
     }.getOrElse { error ->
       migrationManager.markRollingBack()
       val snapshot = migrationManager.getSnapshot()
-      if (snapshot?.backupCiphertext != null && snapshot.backupAad != null) {
+      if (snapshot?.backupCiphertext != null) {
         secureStore.write(VAULT_BLOB_KEY, snapshot.backupCiphertext)
-        secureStore.write(VAULT_AAD_KEY, snapshot.backupAad)
       }
       migrationManager.completeMigration()
       throw error
     }
   }
-
-  private fun buildVaultAad(syncVersion: Long): String = "lotus.vault.v1:$syncVersion"
 }

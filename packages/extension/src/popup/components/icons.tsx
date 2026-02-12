@@ -1,4 +1,4 @@
-import { Lock, Search, Plus, Settings, Copy, Eye, EyeOff, Trash2, LogOut, RefreshCw, Key, CreditCard, User, FileText, ChevronRight, Tag, Link, Download, Cloud, LayoutGrid, Shield, Star, Smartphone, QrCode, ArrowLeft, FolderPlus, HardDriveDownload, Fingerprint, Check } from "lucide-react"
+import { Lock, Search, Plus, Settings, Copy, Eye, EyeOff, Trash2, LogOut, RefreshCw, Key, CreditCard, User, FileText, ChevronRight, Tag, Link, Download, Cloud, LayoutGrid, Shield, Star, Smartphone, QrCode, ArrowLeft, FolderPlus, HardDriveDownload, Fingerprint, Check, X } from "lucide-react"
 
 export const Icons = {
   lock: Lock,
@@ -29,5 +29,6 @@ export const Icons = {
   folderPlus: FolderPlus,
   cloudDownload: HardDriveDownload,
   fingerprint: Fingerprint,
-  check: Check
+  check: Check,
+  close: X
 }

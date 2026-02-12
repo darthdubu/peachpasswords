@@ -1,4 +1,5 @@
 import { encrypt, decrypt, bufferToBase64, base64ToBuffer } from './crypto-utils'
+import { logSecurityEvent } from './security-events'
 
 export interface BiometricCredential {
   credentialId: string
@@ -8,11 +9,39 @@ export interface BiometricCredential {
 }
 
 const BIOMETRIC_STORAGE_KEY = 'peach_biometric_credential'
+let lastBiometricError: string | null = null
+
+function secureWipe(buffer: ArrayBuffer | Uint8Array | null | undefined): void {
+  if (!buffer) return
+  if (buffer instanceof ArrayBuffer) {
+    new Uint8Array(buffer).fill(0)
+  } else {
+    buffer.fill(0)
+  }
+}
 
 function toArrayBuffer(view: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(view.byteLength)
   copy.set(view)
   return copy.buffer
+}
+
+function formatBiometricError(error: unknown): string {
+  if (error instanceof DOMException) {
+    return `${error.name}: ${error.message || 'Operation failed'}`
+  }
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`
+  }
+  return String(error)
+}
+
+export function getLastBiometricError(): string | null {
+  return lastBiometricError
+}
+
+export function clearLastBiometricError(): void {
+  lastBiometricError = null
 }
 
 /**
@@ -92,6 +121,7 @@ export async function registerBiometric(
   masterKeyRaw?: ArrayBuffer
 ): Promise<BiometricCredential | null> {
   try {
+    clearLastBiometricError()
     const prfSupported = isPRFSupported()
     
     if (!prfSupported) {
@@ -106,38 +136,53 @@ export async function registerBiometric(
     const challengeBytes = crypto.getRandomValues(new Uint8Array(32))
     const wrappingSalt = crypto.getRandomValues(new Uint8Array(32))
 
-    const credential = (await navigator.credentials.create({
-      publicKey: {
-        challenge: challengeBytes,
-        rp: {
-          name: 'Peach Password Manager',
-          id: window.location.hostname,
-        },
-        user: {
-          id: crypto.getRandomValues(new Uint8Array(16)),
-          name: 'peach-user',
-          displayName: 'Peach User',
-        },
-        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
-        authenticatorSelection: {
-          authenticatorAttachment: 'platform',
-          userVerification: 'required',
-          residentKey: 'discouraged',
-        },
-        attestation: 'none',
-        extensions: {
-          prf: {
-            eval: {
-              first: new Uint8Array(32).fill(1)
-            }
-          }
-        } as any
+    const baseCreateOptions: PublicKeyCredentialCreationOptions = {
+      challenge: challengeBytes,
+      rp: {
+        name: 'Peach Password Manager'
       },
-    })) as PublicKeyCredential | null
+      user: {
+        id: crypto.getRandomValues(new Uint8Array(16)),
+        name: 'peach-user',
+        displayName: 'Peach User',
+      },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      authenticatorSelection: {
+        userVerification: 'required',
+        residentKey: 'preferred',
+      },
+      attestation: 'none',
+      timeout: 60000,
+      extensions: {
+        prf: {
+          eval: {
+            first: new Uint8Array(32).fill(1)
+          }
+        }
+      } as any
+    }
+
+    let credential: PublicKeyCredential | null = null
+    try {
+      credential = (await navigator.credentials.create({
+        publicKey: {
+          ...baseCreateOptions,
+          authenticatorSelection: {
+            ...(baseCreateOptions.authenticatorSelection || {}),
+            authenticatorAttachment: 'platform',
+            userVerification: 'required'
+          }
+        }
+      })) as PublicKeyCredential | null
+    } catch {
+      credential = (await navigator.credentials.create({
+        publicKey: baseCreateOptions
+      })) as PublicKeyCredential | null
+    }
 
     if (!credential) return null
 
-    const credentialId = new Uint8Array(credential.rawId)
+    const credentialId = credential.rawId
 
     const extensionResults = (credential as any).getClientExtensionResults()
     let prfOutput: ArrayBuffer | undefined
@@ -181,29 +226,38 @@ export async function registerBiometric(
 
     const wrappingKey = await deriveWrappingKeyFromPRF(prfOutput, wrappingSalt)
 
-    const encryptedKeyBuffer = await encrypt(wrappingKey, masterKeyRaw.slice(0))
+    const rawCopy = new Uint8Array(masterKeyRaw.slice(0))
+    const encryptedKeyBuffer = await encrypt(wrappingKey, toArrayBuffer(rawCopy))
 
     const combined = new Uint8Array(wrappingSalt.length + encryptedKeyBuffer.byteLength)
     combined.set(wrappingSalt, 0)
     combined.set(new Uint8Array(encryptedKeyBuffer), wrappingSalt.length)
 
     const biometricCred: BiometricCredential = {
-      credentialId: bufferToBase64(credentialId.buffer),
+      credentialId: bufferToBase64(credentialId),
       createdAt: Date.now(),
       encryptedKey: bufferToBase64(combined.buffer),
       prfSupported: true
     }
 
     await chrome.storage.local.set({ [BIOMETRIC_STORAGE_KEY]: biometricCred })
+    secureWipe(rawCopy)
+    secureWipe(challengeBytes)
+    secureWipe(wrappingSalt)
+    clearLastBiometricError()
+    await logSecurityEvent('biometric-auth-success', 'info', { action: 'registration' })
     return biometricCred
   } catch (error) {
+    lastBiometricError = formatBiometricError(error)
     console.error('Biometric registration error:', error)
+    await logSecurityEvent('biometric-auth-failure', 'warning', { action: 'registration', error: lastBiometricError })
     return null
   }
 }
 
 export async function authenticateWithBiometric(): Promise<CryptoKey | null> {
   try {
+    clearLastBiometricError()
     const result = await chrome.storage.local.get(BIOMETRIC_STORAGE_KEY)
     const storedCred = result[BIOMETRIC_STORAGE_KEY] as
       | BiometricCredential
@@ -256,15 +310,23 @@ export async function authenticateWithBiometric(): Promise<CryptoKey | null> {
 
     const decryptedKeyBuffer = await decrypt(wrappingKey, toArrayBuffer(encryptedKey))
 
-    return crypto.subtle.importKey(
+    const imported = await crypto.subtle.importKey(
       'raw',
       decryptedKeyBuffer,
       { name: 'HKDF' },
       false,
       ['deriveKey']
     )
+    clearLastBiometricError()
+    secureWipe(credentialId)
+    secureWipe(combined)
+    secureWipe(wrappingSalt)
+    secureWipe(encryptedKey)
+    return imported
   } catch (error) {
+    lastBiometricError = formatBiometricError(error)
     console.error('Biometric authentication error:', error)
+    await logSecurityEvent('biometric-auth-failure', 'warning', { error: lastBiometricError })
     return null
   }
 }
