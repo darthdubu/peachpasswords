@@ -1,210 +1,358 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useDeferredValue, memo, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useVault } from '../contexts/VaultContext'
-import { Input } from './ui/input'
-import { Button } from './ui/button'
-import { ScrollArea } from './ui/scroll-area'
+import { useVaultActions, useVaultState } from '../contexts/VaultContext'
 import { Icons } from './icons'
 import { VaultEntry } from '@lotus/shared'
+import { getUrlMatchScore, parseUrlCandidate } from '../../lib/url-match'
+import { cn } from '@/lib/utils'
 
 interface VaultListProps {
+  filter: 'all' | 'login' | 'card' | 'identity' | 'note' | 'favorite' | 'trash'
+  searchQuery: string
+  onSearchChange: (query: string) => void
   onSelectEntry: (entry: VaultEntry) => void
-  onAddEntry: () => void
+  syncStatus?: string
+  s3SyncStatus?: string
 }
 
-export function VaultList({ onSelectEntry, onAddEntry }: VaultListProps) {
-  const { searchEntries } = useVault()
-  const [searchQuery, setSearchQuery] = useState('')
-  const [selectedType, setSelectedType] = useState<string | null>(null)
+function getTrashedAt(entry: VaultEntry): number | undefined {
+  return (entry as VaultEntry & { trashedAt?: number }).trashedAt
+}
 
-  const entries = searchEntries(searchQuery)
+function getTrashExpiresAt(entry: VaultEntry): number | undefined {
+  return (entry as VaultEntry & { trashExpiresAt?: number }).trashExpiresAt
+}
+
+function getIconForType(type: string) {
+  switch (type) {
+    case 'login': return Icons.key
+    case 'card': return Icons.card
+    case 'identity': return Icons.user
+    case 'note': return Icons.note
+    default: return Icons.lock
+  }
+}
+
+function getTypeColor(type: string) {
+  switch (type) {
+    case 'login': return 'bg-blue-500/10 text-blue-400'
+    case 'card': return 'bg-emerald-500/10 text-emerald-400'
+    case 'identity': return 'bg-violet-500/10 text-violet-400'
+    case 'note': return 'bg-amber-500/10 text-amber-400'
+    default: return 'bg-white/10 text-white/60'
+  }
+}
+
+function getSubtitle(entry: VaultEntry) {
+  if (typeof entry.login?.username === 'string' && entry.login.username.length > 0) return entry.login.username
+  if (entry.card?.number) return `•••• ${entry.card.number.slice(-4)}`
+  if (entry.identity?.email) return entry.identity.email
+  return ''
+}
+
+function getFilterLabel(filter: string) {
+  switch (filter) {
+    case 'all': return 'All Items'
+    case 'favorite': return 'Favorites'
+    case 'login': return 'Passwords'
+    case 'card': return 'Cards'
+    case 'note': return 'Notes'
+    case 'trash': return 'Trash'
+    default: return 'Items'
+  }
+}
+
+function getSyncStatusColor(syncStatus?: string, s3SyncStatus?: string): string {
+  const anyError = syncStatus === 'error' || s3SyncStatus === 'error'
+  const anyConnected = syncStatus === 'connected' || s3SyncStatus === 'connected'
+  const anyConnecting = syncStatus === 'connecting' || s3SyncStatus === 'connecting'
+  
+  if (anyError) return 'text-red-400'
+  if (anyConnecting) return 'text-amber-400'
+  if (anyConnected) return 'text-emerald-400'
+  return 'text-white/30'
+}
+
+function SyncStatusIcon({ syncStatus, s3SyncStatus }: { syncStatus?: string; s3SyncStatus?: string }) {
+  const colorClass = getSyncStatusColor(syncStatus, s3SyncStatus)
+  
+  return (
+    <div className="flex items-center gap-1.5">
+      <Icons.cloud className={cn("h-3.5 w-3.5", colorClass)} />
+      <span className={cn("w-1.5 h-1.5 rounded-full", colorClass.replace('text-', 'bg-'))} />
+    </div>
+  )
+}
+
+export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, syncStatus, s3SyncStatus }: VaultListProps) {
+  const { searchEntries, getTrashedEntries, restoreEntry, permanentlyDeleteEntry } = useVaultActions()
+  const { vault } = useVaultState()
+  const [currentSiteUrl, setCurrentSiteUrl] = useState('')
+  const [currentSiteHost, setCurrentSiteHost] = useState('')
+  const [isSearchFocused, setIsSearchFocused] = useState(false)
+  const deferredSearchQuery = useDeferredValue(searchQuery)
+  const allEntries = useMemo(() => (Array.isArray(vault?.entries) ? vault.entries.filter((entry) => !getTrashedAt(entry)) : []), [vault?.entries])
+  const tabRefreshTimerRef = useRef<number | null>(null)
+
+  const entries = useMemo(() => { const r = searchEntries(deferredSearchQuery); return Array.isArray(r) ? r : [] }, [searchEntries, deferredSearchQuery])
   
   const filteredEntries = useMemo(() => {
-    if (!selectedType) return entries
-    return entries.filter(e => e.type === selectedType)
-  }, [entries, selectedType])
+    if (filter === 'favorite') return entries.filter(e => e.favorite)
+    if (filter === 'trash') {
+      return getTrashedEntries()
+        .filter(e => !deferredSearchQuery.trim() || `${e.name} ${e.login?.username}`.toLowerCase().includes(deferredSearchQuery.toLowerCase()))
+        .sort((a, b) => Number(getTrashedAt(b) || 0) - Number(getTrashedAt(a) || 0))
+    }
+    if (filter !== 'all') return entries.filter(e => e.type === filter)
+    return entries
+  }, [deferredSearchQuery, entries, filter, getTrashedEntries])
 
-  const favorites = useMemo(() => 
-    entries.filter(e => e.favorite),
-    [entries]
-  )
+  const currentSiteMatches = useMemo(() => {
+    if (!currentSiteUrl) return []
+    return allEntries
+      .filter(e => e.type === 'login' && e.login)
+      .map(e => ({ entry: e, score: (e.login?.urls || []).reduce((b, u) => Math.max(b, getUrlMatchScore(u, currentSiteUrl)), 0) }))
+      .filter(m => m.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+  }, [currentSiteUrl, allEntries])
 
-  const getIconForType = (type: string) => {
-    switch (type) {
-      case 'login': return Icons.key
-      case 'card': return Icons.card
-      case 'identity': return Icons.user
-      case 'note': return Icons.note
-      default: return Icons.lock
+  const refreshCurrentSite = useCallback(() => {
+    chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+      const activeUrl = tabs[0]?.url || ''
+      const parsed = activeUrl ? parseUrlCandidate(activeUrl) : null
+      if (parsed) {
+        setCurrentSiteUrl(parsed.toString())
+        setCurrentSiteHost(parsed.hostname)
+      }
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const scheduleRefresh = () => {
+      if (tabRefreshTimerRef.current) window.clearTimeout(tabRefreshTimerRef.current)
+      tabRefreshTimerRef.current = window.setTimeout(() => refreshCurrentSite(), 120)
+    }
+    scheduleRefresh()
+    chrome.tabs.onActivated?.addListener(scheduleRefresh)
+    chrome.tabs.onUpdated?.addListener(scheduleRefresh)
+    return () => {
+      if (tabRefreshTimerRef.current) window.clearTimeout(tabRefreshTimerRef.current)
+      chrome.tabs.onActivated?.removeListener(scheduleRefresh)
+      chrome.tabs.onUpdated?.removeListener(scheduleRefresh)
+    }
+  }, [refreshCurrentSite])
+
+  const handleFill = async (entryId?: string) => {
+    if (!currentSiteUrl) return
+    const response = await chrome.runtime.sendMessage({ type: 'REQUEST_CREDENTIALS', url: currentSiteUrl })
+    const credentials = response?.success ? response.credentials : []
+    const selected = entryId ? credentials.find((c: any) => c.entryId === entryId) || credentials[0] : credentials[0]
+    if (!selected?.password) return
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+    const tabId = tabs[0]?.id
+    if (typeof tabId === 'number') {
+      await chrome.tabs.sendMessage(tabId, { type: 'PEACH_FILL_LOGIN', username: selected.username || '', password: selected.password })
     }
   }
 
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'login': return 'bg-blue-500/20 text-blue-400'
-      case 'card': return 'bg-emerald-500/20 text-emerald-400'
-      case 'identity': return 'bg-violet-500/20 text-violet-400'
-      case 'note': return 'bg-amber-500/20 text-amber-400'
-      default: return 'bg-primary/20 text-primary'
-    }
+  if (filter === 'trash') {
+    const trashed = filteredEntries as VaultEntry[]
+    return (
+      <div className="h-full flex flex-col p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-medium text-white/80">Trash</h2>
+          <span className="text-xs text-white/40">{trashed.length} items</span>
+        </div>
+        <div className="relative mb-3">
+          <Icons.search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
+          <input
+            type="text"
+            placeholder="Search trash..."
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="w-full h-9 pl-9 pr-3 rounded-lg bg-white/[0.03] border border-white/[0.06] text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-white/[0.12] transition-colors"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto scrollbar-hide -mx-1 px-1">
+          <AnimatePresence>
+            {trashed.length === 0 ? (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex flex-col items-center justify-center h-32 text-white/30"
+              >
+                <Icons.trash className="h-8 w-8 mb-2 opacity-50" />
+                <p className="text-xs">Trash is empty</p>
+              </motion.div>
+            ) : (
+              trashed.map((entry, index) => (
+                <TrashItem 
+                  key={entry.id} 
+                  entry={entry} 
+                  index={index}
+                  onRestore={() => restoreEntry(entry.id)}
+                  onDelete={() => { if (confirm('Permanently delete?')) permanentlyDeleteEntry(entry.id); }}
+                />
+              ))
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    )
   }
-
-  const getSubtitle = (entry: VaultEntry) => {
-    if (entry.login?.username) return entry.login.username
-    if (entry.card?.number) return `•••• ${entry.card.number.slice(-4)}`
-    if (entry.identity?.email) return entry.identity.email
-    return 'Secure content'
-  }
-
-  const typeFilters = [
-    { type: null as string | null, icon: Icons.layoutGrid, label: 'All' },
-    { type: 'login', icon: Icons.key, label: 'Passwords' },
-    { type: 'card', icon: Icons.card, label: 'Cards' },
-    { type: 'identity', icon: Icons.user, label: 'IDs' },
-    { type: 'note', icon: Icons.note, label: 'Notes' },
-  ]
 
   return (
-    <div className="flex flex-col h-full bg-background">
-      <div className="relative p-3 space-y-3 gradient-mesh">
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <Icons.search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
-            <Input
-              placeholder="Search vault..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 pr-3 h-9 text-sm bg-background/80 backdrop-blur-sm border-border/50 focus:border-primary/50 transition-all"
-            />
-          </div>
-          <Button 
-            size="icon" 
-            onClick={onAddEntry}
-            className="h-9 w-9 glow-primary"
-          >
-            <Icons.plus className="h-4 w-4" />
-          </Button>
+    <div className="h-full flex flex-col">
+      <div className="px-4 pt-4 pb-3">
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-sm font-medium text-white/90">{getFilterLabel(filter)}</h1>
+          <SyncStatusIcon syncStatus={syncStatus} s3SyncStatus={s3SyncStatus} />
         </div>
         
-        <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
-          {typeFilters.map((filter) => {
-            const Icon = filter.icon
-            const isActive = selectedType === filter.type
-            return (
-               <button
-                key={filter.label}
-                onClick={() => setSelectedType(isActive ? null : filter.type)}
-                className={`
-                  flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium
-                  transition-all duration-200 whitespace-nowrap
-                  ${isActive
-                    ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25'
-                    : 'bg-secondary/80 hover:bg-secondary text-secondary-foreground'
-                  }
-                `}
-              >
-                <Icon className="h-4 w-4" />
-                {filter.label}
-              </button>
-            )
-          })}
+        <div className={cn(
+          "relative transition-all duration-200",
+          isSearchFocused && "scale-[1.02]"
+        )}>
+          <Icons.search className={cn(
+            "absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 transition-colors",
+            isSearchFocused ? "text-white/50" : "text-white/30"
+          )} />
+          <input
+            type="text"
+            placeholder="Search vault..."
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setIsSearchFocused(false)}
+            className={cn(
+              "w-full h-9 pl-9 pr-3 rounded-lg text-sm transition-all duration-200",
+              "bg-white/[0.03] text-white placeholder:text-white/25",
+              "border border-transparent focus:border-white/[0.12]",
+              "focus:outline-none focus:bg-white/[0.04]"
+            )}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => onSearchChange('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-white/[0.08] transition-colors"
+            >
+              <Icons.close className="h-3 w-3 text-white/40" />
+            </button>
+          )}
         </div>
       </div>
 
-      <ScrollArea className="flex-1 scrollbar-hide">
-        <div className="p-3 space-y-4">
-          {filteredEntries.length === 0 ? (
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
+      <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-4">
+        <AnimatePresence mode="wait">
+          {!searchQuery && currentSiteHost && currentSiteMatches.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex flex-col items-center justify-center py-8 text-center"
+              exit={{ opacity: 0, y: -10 }}
+              className="mb-3 p-3 rounded-lg bg-primary/5 border border-primary/10"
             >
-              <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mb-3">
-                <Icons.shield className="h-7 w-7 text-primary/60" />
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                  <span className="text-xs text-white/70">{currentSiteHost}</span>
+                </div>
+                <button 
+                  onClick={() => handleFill()} 
+                  className="text-[10px] font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  Auto-fill
+                </button>
               </div>
-              <h3 className="text-sm font-semibold text-foreground mb-1">
-                {searchQuery ? 'No results found' : 'Your vault is empty'}
-              </h3>
-              <p className="text-xs text-muted-foreground max-w-[180px]">
-                {searchQuery 
-                  ? 'Try adjusting your search terms' 
-                  : 'Add your first password to get started'
-                }
-              </p>
-              {!searchQuery && (
-                <Button onClick={onAddEntry} className="mt-3 gap-1.5" size="sm">
-                  <Icons.plus className="h-3.5 w-3.5" />
-                  Add your first entry
-                </Button>
-              )}
+              <div className="space-y-1">
+                {currentSiteMatches.map(({ entry }) => (
+                  <button 
+                    key={entry.id} 
+                    onClick={() => onSelectEntry(entry)} 
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-left hover:bg-white/[0.04] transition-colors"
+                  >
+                    <span className="text-xs text-white/80 truncate flex-1">{entry.name}</span>
+                    <span className="text-[10px] text-white/40 truncate">{getSubtitle(entry)}</span>
+                  </button>
+                ))}
+              </div>
             </motion.div>
-          ) : (
-            <>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="glass rounded-lg p-2 text-center">
-                  <div className="text-lg font-bold text-primary">{entries.length}</div>
-                  <div className="text-[8px] uppercase tracking-wider text-muted-foreground">Total</div>
-                </div>
-                <div className="glass rounded-lg p-2 text-center">
-                  <div className="text-lg font-bold text-amber-500">{favorites.length}</div>
-                  <div className="text-[8px] uppercase tracking-wider text-muted-foreground">Favorites</div>
-                </div>
-                <div className="glass rounded-lg p-2 text-center">
-                  <div className="text-lg font-bold text-emerald-500">
-                    {entries.filter(e => e.login?.password).length}
-                  </div>
-                  <div className="text-[8px] uppercase tracking-wider text-muted-foreground">Passwords</div>
-                </div>
-              </div>
-
-              {favorites.length > 0 && !searchQuery && !selectedType && (
-                <div>
-                  <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                    <Icons.star className="h-2.5 w-2.5 text-amber-500" />
-                    Favorites
-                  </h4>
-                  <div className="space-y-1.5">
-                    {favorites.slice(0, 3).map((entry, index) => (
-                      <EntryCard
-                        key={entry.id}
-                        entry={entry}
-                        index={index}
-                        onClick={() => onSelectEntry(entry)}
-                        getIconForType={getIconForType}
-                        getTypeColor={getTypeColor}
-                        getSubtitle={getSubtitle}
-                        isFavorite
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                  {searchQuery ? 'Search Results' : selectedType ? `${selectedType.charAt(0).toUpperCase() + selectedType.slice(1)}s` : 'All Entries'}
-                </h4>
-                <div className="space-y-1.5">
-                  <AnimatePresence mode="popLayout">
-                    {filteredEntries.map((entry, index) => (
-                      <EntryCard
-                        key={entry.id}
-                        entry={entry}
-                        index={index}
-                        onClick={() => onSelectEntry(entry)}
-                        getIconForType={getIconForType}
-                        getTypeColor={getTypeColor}
-                        getSubtitle={getSubtitle}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </div>
-              </div>
-            </>
           )}
+        </AnimatePresence>
+
+        <div className="space-y-1">
+          <AnimatePresence>
+            {filteredEntries.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex flex-col items-center justify-center h-48 text-white/30"
+              >
+                <div className="w-12 h-12 rounded-full bg-white/[0.03] flex items-center justify-center mb-3">
+                  <Icons.shield className="h-5 w-5 opacity-50" />
+                </div>
+                <p className="text-xs mb-1">{searchQuery ? 'No matches found' : 'Your vault is empty'}</p>
+                {!searchQuery && (
+                  <p className="text-[10px] text-white/20">Click the + button to add your first item</p>
+                )}
+              </motion.div>
+            ) : (
+              filteredEntries.map((entry, index) => (
+                <EntryCard 
+                  key={entry.id} 
+                  entry={entry} 
+                  index={index}
+                  onClick={() => onSelectEntry(entry)} 
+                />
+              ))
+            )}
+          </AnimatePresence>
         </div>
-      </ScrollArea>
+      </div>
     </div>
+  )
+}
+
+function TrashItem({ entry, index, onRestore, onDelete }: { 
+  entry: VaultEntry
+  index: number
+  onRestore: () => void
+  onDelete: () => void
+}) {
+  const Icon = getIconForType(entry.type)
+  const colorClass = getTypeColor(entry.type)
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: index * 0.03 }}
+      className="group flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/[0.03] transition-colors"
+    >
+      <div className={cn("w-8 h-8 rounded-md flex items-center justify-center", colorClass)}>
+        <Icon className="h-3.5 w-3.5" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-white/80 truncate">{entry.name || 'Untitled'}</p>
+        <p className="text-[10px] text-white/30 truncate">
+          {getTrashExpiresAt(entry) ? `Expires ${new Date(getTrashExpiresAt(entry)!).toLocaleDateString()}` : 'Trash'}
+        </p>
+      </div>
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button 
+          onClick={onRestore} 
+          className="px-2.5 py-1 text-[10px] font-medium text-primary hover:bg-primary/10 rounded transition-colors"
+        >
+          Restore
+        </button>
+        <button 
+          onClick={onDelete} 
+          className="px-2.5 py-1 text-[10px] font-medium text-red-400 hover:bg-red-500/10 rounded transition-colors"
+        >
+          Delete
+        </button>
+      </div>
+    </motion.div>
   )
 }
 
@@ -212,62 +360,42 @@ interface EntryCardProps {
   entry: VaultEntry
   index: number
   onClick: () => void
-  getIconForType: (type: string) => React.ComponentType<{ className?: string }>
-  getTypeColor: (type: string) => string
-  getSubtitle: (entry: VaultEntry) => string
-  isFavorite?: boolean
 }
 
-function EntryCard({ entry, index, onClick, getIconForType, getTypeColor, getSubtitle, isFavorite }: EntryCardProps) {
+const EntryCard = memo(function EntryCard({ entry, index, onClick }: EntryCardProps) {
   const Icon = getIconForType(entry.type)
-  const typeColor = getTypeColor(entry.type)
-
+  const colorClass = getTypeColor(entry.type)
+  const subtitle = getSubtitle(entry)
+  
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 10 }}
+    <motion.button
+      initial={{ opacity: 0, y: 5 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ delay: index * 0.03 }}
+      transition={{ delay: index * 0.02, duration: 0.2 }}
       onClick={onClick}
-      className={`
-        group flex items-center p-2.5 rounded-lg cursor-pointer
-        transition-all duration-200 ease-out
-        glass hover:bg-white/[0.05] 
-        hover:shadow-md hover:shadow-primary/10
-        hover:scale-[1.01]
-        ${isFavorite ? 'border-amber-500/20' : ''}
-      `}
+      className="w-full group flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/[0.04] active:bg-white/[0.06] transition-all duration-150 text-left"
     >
-      <div className={`
-        h-9 w-9 rounded-lg flex items-center justify-center mr-2.5
-        transition-transform duration-200 group-hover:scale-105
-        ${typeColor}
-      `}>
+      <div className={cn(
+        "w-9 h-9 rounded-lg flex items-center justify-center transition-transform duration-200",
+        colorClass,
+        "group-hover:scale-105"
+      )}>
         <Icon className="h-4 w-4" />
       </div>
+      
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <h3 className="font-medium text-xs truncate text-foreground/90">{entry.name}</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm text-white/90 truncate font-normal">{entry.name || 'Untitled'}</h3>
           {entry.favorite && (
-            <Icons.star className="h-2.5 w-2.5 text-amber-500 fill-amber-500 flex-shrink-0" />
+            <Icons.star className="h-3 w-3 text-amber-400/80 fill-amber-400/80 shrink-0" />
           )}
         </div>
-        <p className="text-[10px] text-muted-foreground truncate mt-0">
-          {getSubtitle(entry)}
-        </p>
+        {subtitle && (
+          <p className="text-xs text-white/35 truncate mt-0.5">{subtitle}</p>
+        )}
       </div>
-      <div className="flex items-center gap-1.5">
-        {entry.tags.slice(0, 2).map(tag => (
-          <span 
-            key={tag} 
-            className="hidden sm:inline-block px-1 py-0 text-[8px] rounded bg-secondary text-secondary-foreground"
-          >
-            {tag}
-          </span>
-        ))}
-        <Icons.chevronRight className="h-3.5 w-3.5 text-muted-foreground/50 transition-colors group-hover:text-primary" />
-      </div>
-    </motion.div>
+      
+      <Icons.chevronRight className="h-4 w-4 text-white/20 group-hover:text-white/40 transition-colors shrink-0" />
+    </motion.button>
   )
-}
+})
