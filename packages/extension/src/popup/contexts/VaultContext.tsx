@@ -1428,7 +1428,9 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       let changed = false
       const updatedModified = Date.now()
-      const mergedLogin = { ...match.login }
+      const mergedEntry: VaultEntry = { ...match }
+      const mergedLogin = { ...match.login! }
+
       const importedUsername = (importedEntry.login.username || '').trim()
       if (!mergedLogin.username && importedUsername) {
         mergedLogin.username = importedUsername
@@ -1459,27 +1461,35 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         changed = true
       }
 
-      const nextNote = match.note?.content
-      if (!nextNote && importedEntry.note?.content) {
+      if (mergedEntry.note?.content && importedEntry.note?.content) {
         const encryptedNote = await encryptValue(importedEntry.note.content, match.id, updatedModified)
-        const updated: VaultEntry = {
-          ...match,
-          modified: updatedModified,
-          login: mergedLogin,
-          note: { content: encryptedNote }
-        }
-        nextEntries = nextEntries.map((entry) => (entry.id === match.id ? updated : entry))
-        summary.merged += 1
-        continue
+        mergedEntry.note = { content: encryptedNote }
+        changed = true
+      }
+
+      const importedTags = importedEntry.tags || []
+      const existingTags = mergedEntry.tags || []
+      const newTags = importedTags.filter((tag) => !existingTags.includes(tag))
+      if (newTags.length > 0) {
+        mergedEntry.tags = [...existingTags, ...newTags]
+        changed = true
+      }
+
+      if (!mergedEntry.favorite && importedEntry.favorite) {
+        mergedEntry.favorite = true
+        changed = true
+      }
+
+      const importedName = (importedEntry.name || '').trim()
+      const existingName = (mergedEntry.name || '').trim()
+      if (importedName && importedName.length > existingName.length) {
+        mergedEntry.name = importedName
+        changed = true
       }
 
       if (changed) {
-        // LOTUS-017: Prepare merged entry with encrypted metadata
-        const mergedEntry: VaultEntry = {
-          ...match,
-          modified: updatedModified,
-          login: mergedLogin
-        }
+        mergedEntry.modified = updatedModified
+        mergedEntry.login = mergedLogin
         const updated = await prepareEntryForStorage(key, mergedEntry)
         nextEntries = nextEntries.map((entry) => (entry.id === match.id ? updated : entry))
         summary.merged += 1

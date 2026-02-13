@@ -1288,7 +1288,7 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
               <option value="append" className="bg-background text-foreground">Append as new entries</option>
             </select>
             <p className="text-[11px] text-muted-foreground">
-              Merge mode avoids duplicates and fills missing username/URLs on matched entries.
+              Merge mode avoids duplicates and fills missing username, password, URLs, TOTP, notes, tags, and favorites on matched entries.
             </p>
           </div>
           <Label>Import from CSV, JSON, or ZIP</Label>
