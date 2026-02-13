@@ -295,7 +295,7 @@ function UnlockView({ onForgot }: { onForgot?: () => void }) {
                   autoFocus
                 />
 
-                {error && <p className="text-xs text-red-400">{error}</p>}
+          {error && <p className="text-xs text-red-400">{error}</p>}
 
                 <GlassButton type="submit" disabled={isSubmitting || !password} className="w-full">
                   {isSubmitting ? <Icons.refresh className="h-4 w-4 animate-spin mr-2" /> : 'Unlock Vault'}
@@ -390,21 +390,30 @@ function HomeView({ onNavigate }: { onNavigate: (v: View) => void }) {
 
 function CreateView({ onBack }: { onBack: () => void }) {
   const { createVault } = useVaultActions()
+  const { error: contextError } = useVaultState()
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [error, setError] = useState('')
+  const [localError, setLocalError] = useState('')
 
   const strength = { score: password.length > 8 ? (password.length > 12 ? 3 : 2) : 1, label: password.length > 12 ? 'Strong' : password.length > 8 ? 'Good' : 'Weak' }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    if (password !== confirm) { setError("Passwords don't match"); return }
-    if (password.length < 8) { setError('Password too short'); return }
+    setLocalError('')
+    if (password !== confirm) { setLocalError("Passwords don't match"); return }
+    if (password.length < 8) { setLocalError('Password too short'); return }
     setIsSubmitting(true)
-    try { await createVault(password) } finally { setIsSubmitting(false) }
+    try {
+      await createVault(password)
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to create vault')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
+
+  const displayError = localError || contextError
 
   return (
     <div className="flex h-full items-center justify-center p-8">
@@ -437,7 +446,7 @@ function CreateView({ onBack }: { onBack: () => void }) {
             </div>
           )}
 
-          {error && <p className="text-xs text-red-400">{error}</p>}
+          {displayError && <p className="text-xs text-red-400">{displayError}</p>}
 
           <GlassButton type="submit" disabled={isSubmitting || !password || password !== confirm} className="w-full">
             {isSubmitting ? <Icons.refresh className="h-4 w-4 animate-spin mr-2" /> : 'Create Vault'}

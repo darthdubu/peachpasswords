@@ -439,11 +439,19 @@ export function Settings({ onBack }: { onBack: () => void }) {
         alert('Touch ID enabled successfully!')
       } else {
         const biometricError = getLastBiometricError()
-        setPasswordPromptError(
-          biometricError
-            ? `Failed to enable Touch ID: ${biometricError}`
-            : 'Failed to enable Touch ID. If the popup says your device cannot be used, your current authenticator likely does not support PRF on this context. Keep using PIN/password and try Chrome + latest macOS with iCloud Keychain enabled.'
-        )
+        const supportInfo = getBiometricSupportInfo()
+        
+        if (supportInfo.reason === 'ungoogled-chromium') {
+          setPasswordPromptError(
+            'Touch ID is not available in Ungoogled Chromium (WebAuthn platform authenticators are disabled). Please use PIN unlock instead, or use standard Chrome/Chromium.'
+          )
+        } else {
+          setPasswordPromptError(
+            biometricError
+              ? `Failed to enable Touch ID: ${biometricError}`
+              : 'Failed to enable Touch ID. If the popup says your device cannot be used, your current authenticator likely does not support PRF on this context. Keep using PIN/password and try Chrome + latest macOS with iCloud Keychain enabled.'
+          )
+        }
       }
     } catch (e) {
       console.error(e)

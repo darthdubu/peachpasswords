@@ -81,7 +81,7 @@ async function deriveWrappingKeyFromPRF(
  */
 export interface BiometricSupportInfo {
   supported: boolean
-  reason?: 'not-secure-context' | 'api-not-available' | 'prf-not-supported' | 'no-platform-authenticator'
+  reason?: 'not-secure-context' | 'api-not-available' | 'prf-not-supported' | 'no-platform-authenticator' | 'ungoogled-chromium'
   browserVersion?: string
 }
 

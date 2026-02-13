@@ -361,7 +361,13 @@ function createDropdownHeader(): HTMLElement {
   
   const logo = document.createElement('div')
   logo.className = 'peach-logo'
-  logo.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2C8.5 2 6 4.5 6 7c0 1.5.5 2.5 1.5 3.5-1 1-2.5 2.5-2.5 5v3c0 1.5 1 2.5 2.5 2.5h9c1.5 0 2.5-1 2.5-2.5v-3c0-2.5-1.5-4-2.5-5C17.5 9.5 18 8.5 18 7c0-2.5-2.5-5-6-5zm0 2c2 0 3.5 1.5 3.5 3S14 10 12 10 8.5 8.5 8.5 7s1.5-3 3.5-3z"/></svg>'
+  // SECURITY: Use DOM API instead of innerHTML to prevent XSS
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  path.setAttribute('d', 'M12 2C8.5 2 6 4.5 6 7c0 1.5.5 2.5 1.5 3.5-1 1-2.5 2.5-2.5 5v3c0 1.5 1 2.5 2.5 2.5h9c1.5 0 2.5-1 2.5-2.5v-3c0-2.5-1.5-4-2.5-5C17.5 9.5 18 8.5 18 7c0-2.5-2.5-5-6-5zm0 2c2 0 3.5 1.5 3.5 3S14 10 12 10 8.5 8.5 8.5 7s1.5-3 3.5-3z')
+  svg.appendChild(path)
+  logo.appendChild(svg)
   
   const brand = document.createElement('span')
   brand.className = 'peach-brand'
@@ -423,7 +429,14 @@ function createCredentialRow(
   
   const arrow = document.createElement('div')
   arrow.className = 'peach-credential-arrow'
-  arrow.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>'
+  // SECURITY: Use DOM API instead of innerHTML
+  const arrowSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  arrowSvg.setAttribute('viewBox', '0 0 24 24')
+  arrowSvg.setAttribute('fill', 'currentColor')
+  const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  arrowPath.setAttribute('d', 'M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z')
+  arrowSvg.appendChild(arrowPath)
+  arrow.appendChild(arrowSvg)
   
   row.appendChild(favicon)
   row.appendChild(info)
@@ -446,7 +459,17 @@ function createDropdownFooter(isSignup: boolean): HTMLElement {
   
   const openBtn = document.createElement('button')
   openBtn.className = 'peach-btn'
-  openBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg> Open Peach'
+  // SECURITY: Build SVG and text safely without innerHTML
+  const openSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  openSvg.setAttribute('width', '14')
+  openSvg.setAttribute('height', '14')
+  openSvg.setAttribute('viewBox', '0 0 24 24')
+  openSvg.setAttribute('fill', 'currentColor')
+  const openPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  openPath.setAttribute('d', 'M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z')
+  openSvg.appendChild(openPath)
+  openBtn.appendChild(openSvg)
+  openBtn.appendChild(document.createTextNode(' Open Peach'))
   openBtn.addEventListener('click', () => {
     chrome.runtime.sendMessage({ type: 'OPEN_POPUP' }).catch(() => {})
     closeActiveDropdown()
@@ -457,7 +480,17 @@ function createDropdownFooter(isSignup: boolean): HTMLElement {
   if (isSignup) {
     const genBtn = document.createElement('button')
     genBtn.className = 'peach-btn peach-btn-primary'
-    genBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg> Generate Password'
+    // SECURITY: Build SVG and text safely without innerHTML
+    const genSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    genSvg.setAttribute('width', '14')
+    genSvg.setAttribute('height', '14')
+    genSvg.setAttribute('viewBox', '0 0 24 24')
+    genSvg.setAttribute('fill', 'currentColor')
+    const genPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    genPath.setAttribute('d', 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z')
+    genSvg.appendChild(genPath)
+    genBtn.appendChild(genSvg)
+    genBtn.appendChild(document.createTextNode(' Generate Password'))
     genBtn.addEventListener('click', () => {
       chrome.runtime.sendMessage({ type: 'OPEN_POPUP', action: 'generate' }).catch(() => {})
       closeActiveDropdown()
