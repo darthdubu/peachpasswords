@@ -223,6 +223,16 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
               >
                 Cancel
               </button>
+              <button
+                onClick={() => {
+                  const allIds = new Set(filteredEntries.map(e => e.id))
+                  const isAllSelected = selectedIds.size === filteredEntries.length && filteredEntries.length > 0
+                  setSelectedIds(isAllSelected ? new Set() : allIds)
+                }}
+                className="text-xs text-primary hover:text-primary/80"
+              >
+                {selectedIds.size === filteredEntries.length && filteredEntries.length > 0 ? 'Deselect All' : 'Select All'}
+              </button>
               <span className="text-xs text-white/40">
                 {selectedIds.size} selected
               </span>
