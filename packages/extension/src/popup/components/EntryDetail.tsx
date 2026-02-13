@@ -5,6 +5,7 @@ import { Icons } from './icons'
 import { VaultEntry } from '@lotus/shared'
 import { generateTotpCode, getTotpRemainingSeconds } from '../../lib/totp'
 import { cn } from '@/lib/utils'
+import { copyToClipboard, isClipboardActive, getClipboardTimeRemaining } from '../../lib/clipboard'
 
 interface EntryDetailProps {
   entry: VaultEntry
@@ -145,9 +146,38 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps) {
     clearRevealTimer('cvv')
   }, [entry.id, clearRevealTimer])
 
+  const [clipboardCountdown, setClipboardCountdown] = useState(0)
+  const clipboardTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  const updateClipboardCountdown = useCallback(() => {
+    if (isClipboardActive()) {
+      const remaining = getClipboardTimeRemaining()
+      setClipboardCountdown(remaining)
+      if (remaining > 0) {
+        clipboardTimerRef.current = setTimeout(updateClipboardCountdown, 1000)
+      } else {
+        setClipboardCountdown(0)
+      }
+    } else {
+      setClipboardCountdown(0)
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (clipboardTimerRef.current) {
+        clearTimeout(clipboardTimerRef.current)
+      }
+    }
+  }, [])
+
   const handleCopy = async (text: string, field: CopyField) => {
     if (!text?.trim()) return
-    try { await navigator.clipboard.writeText(String(text)); markCopied(field); } catch {}
+    try {
+      await copyToClipboard(String(text))
+      markCopied(field)
+      updateClipboardCountdown()
+    } catch {}
   }
 
   const getIconForType = (type: string) => {
@@ -302,6 +332,15 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps) {
           </div>
         )}
       </div>
+
+      {clipboardCountdown > 0 && (
+        <div className="mt-3 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-amber-400">Clipboard will clear in</span>
+            <span className="text-xs font-mono text-amber-400">{Math.ceil(clipboardCountdown / 1000)}s</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

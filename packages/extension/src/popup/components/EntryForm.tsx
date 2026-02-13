@@ -162,7 +162,8 @@ export function EntryForm({ initialEntry, onSave, onCancel }: EntryFormProps) {
                   <Icons.lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
                   <Input type="text" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="pl-9 bg-white/[0.03] border-white/[0.08] text-white font-mono placeholder:text-white/30" />
                 </div>
-                <button type="button" onClick={() => setShowGenerator(v => !v)} className="text-xs text-primary hover:text-primary/80 transition-colors">
+                {password && <PasswordStrengthIndicator password={password} />}
+                <button type="button" onClick={() => setShowGenerator(v => !v)} className="text-xs text-primary hover:text-primary/80 transition-colors mt-2">
                   {showGenerator ? 'Hide generator' : 'Generate password'}
                 </button>
 
@@ -261,6 +262,46 @@ export function EntryForm({ initialEntry, onSave, onCancel }: EntryFormProps) {
           {isSubmitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" /> : null}
           Save
         </Button>
+      </div>
+    </div>
+  )
+}
+
+interface PasswordStrengthIndicatorProps {
+  password: string
+}
+
+function PasswordStrengthIndicator({ password }: PasswordStrengthIndicatorProps) {
+  const calculateStrength = (pwd: string): { score: number; label: string; color: string } => {
+    let score = 0
+    
+    if (pwd.length >= 8) score += 1
+    if (pwd.length >= 12) score += 1
+    if (/[a-z]/.test(pwd) && /[A-Z]/.test(pwd)) score += 1
+    if (/[0-9]/.test(pwd)) score += 1
+    if (/[^a-zA-Z0-9]/.test(pwd)) score += 1
+    
+    if (score <= 2) return { score, label: 'Weak', color: 'bg-red-500' }
+    if (score <= 3) return { score, label: 'Fair', color: 'bg-yellow-500' }
+    if (score <= 4) return { score, label: 'Good', color: 'bg-blue-500' }
+    return { score, label: 'Strong', color: 'bg-green-500' }
+  }
+
+  const strength = calculateStrength(password)
+  const percentage = (strength.score / 5) * 100
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+          <div
+            className={`h-full transition-all duration-300 ${strength.color}`}
+            style={{ width: `${percentage}%` }}
+          />
+        </div>
+        <span className={`text-xs ${strength.color.replace('bg-', 'text-')}`}>
+          {strength.label}
+        </span>
       </div>
     </div>
   )
