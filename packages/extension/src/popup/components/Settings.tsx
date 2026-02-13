@@ -530,6 +530,73 @@ export function Settings({ onBack }: { onBack: () => void }) {
     URL.revokeObjectURL(url)
   }
 
+  const handleExportCsv = async () => {
+    if (!vault) return
+    
+    const loginEntries = vault.entries.filter(e => e.type === 'login')
+    const csvRows = await Promise.all(loginEntries.map(async (entry) => {
+      let password = ''
+      if (entry.login?.password) {
+        try {
+          password = await decryptValue(entry.login.password, entry.id, entry.modified)
+        } catch {}
+      }
+      const fields = [
+        entry.name,
+        entry.login?.username || '',
+        password,
+        (entry.login?.urls || []).join(', '),
+        entry.favorite ? 'yes' : 'no'
+      ]
+      return fields.map(field => `"${(field || '').replace(/"/g, '""')}"`).join(',')
+    }))
+    
+    const csv = ['Name,Username,Password,URLs,Favorite', ...csvRows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `peach-export-${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportEmergencyKit = () => {
+    const kit = `
+PEACH PASSWORD MANAGER - EMERGENCY KIT
+======================================
+
+Generated: ${new Date().toLocaleString()}
+
+IMPORTANT INFORMATION:
+- Your vault is encrypted with your master password
+- Without your master password, your data cannot be recovered
+- Keep this emergency kit in a safe place
+
+RECOVERY OPTIONS:
+1. Master Password: The password you use to unlock your vault
+2. Recovery Key: If generated, found in Settings > Security > Recovery Key
+
+SUPPORT:
+- Extension Version: ${chrome.runtime.getManifest().version}
+- For help, contact support
+
+KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
+    `.trim()
+    
+    const blob = new Blob([kit], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'peach-emergency-kit.txt'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -1080,15 +1147,33 @@ export function Settings({ onBack }: { onBack: () => void }) {
 
     if (activeCategory === 'backup') {
       return (
-        <SettingsSectionCard title="Vault Export" subtitle="Download a decrypted JSON backup">
-          <Button variant="outline" className="w-full justify-start" onClick={handleExport}>
-            <Icons.download className="mr-2 h-4 w-4" />
-            Export Vault (JSON)
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            Use for migration or offline archival. Keep this file secure.
-          </p>
-        </SettingsSectionCard>
+        <>
+          <SettingsSectionCard title="Vault Export" subtitle="Download your vault data">
+            <div className="space-y-2">
+              <Button variant="outline" className="w-full justify-start" onClick={handleExport}>
+                <Icons.download className="mr-2 h-4 w-4" />
+                Export as JSON (decrypted)
+              </Button>
+              <Button variant="outline" className="w-full justify-start" onClick={handleExportCsv}>
+                <Icons.download className="mr-2 h-4 w-4" />
+                Export as CSV
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              JSON includes all data. CSV includes only logins. Keep exports secure.
+            </p>
+          </SettingsSectionCard>
+
+          <SettingsSectionCard title="Emergency Kit" subtitle="Printable recovery information">
+            <Button variant="outline" className="w-full justify-start" onClick={handleExportEmergencyKit}>
+              <Icons.download className="mr-2 h-4 w-4" />
+                Download Emergency Kit
+            </Button>
+            <p className="text-xs text-muted-foreground mt-3">
+              Contains your vault ID and recovery instructions. Store in a safe place.
+            </p>
+          </SettingsSectionCard>
+        </>
       )
     }
 

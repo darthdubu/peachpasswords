@@ -86,7 +86,7 @@ function SyncStatusIcon({ syncStatus, s3SyncStatus }: { syncStatus?: string; s3S
 
 export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, syncStatus, s3SyncStatus }: VaultListProps) {
   const { searchEntries, getTrashedEntries, restoreEntry, permanentlyDeleteEntry } = useVaultActions()
-  const { vault } = useVaultState()
+  const { vault, lastSyncTime, s3LastSyncTime } = useVaultState()
   const [currentSiteUrl, setCurrentSiteUrl] = useState('')
   const [currentSiteHost, setCurrentSiteHost] = useState('')
   const [isSearchFocused, setIsSearchFocused] = useState(false)
@@ -207,7 +207,23 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-sm font-medium text-white/90">{getFilterLabel(filter)}</h1>
-          <SyncStatusIcon syncStatus={syncStatus} s3SyncStatus={s3SyncStatus} />
+          <div className="flex items-center gap-2">
+            {(lastSyncTime || s3LastSyncTime) && (
+              <span className="text-[10px] text-white/30">
+                {(() => {
+                  const lastSync = Math.max(lastSyncTime || 0, s3LastSyncTime || 0)
+                  if (!lastSync) return ''
+                  const mins = Math.floor((Date.now() - lastSync) / 60000)
+                  if (mins < 1) return 'Just now'
+                  if (mins < 60) return `${mins}m ago`
+                  const hours = Math.floor(mins / 60)
+                  if (hours < 24) return `${hours}h ago`
+                  return `${Math.floor(hours / 24)}d ago`
+                })()}
+              </span>
+            )}
+            <SyncStatusIcon syncStatus={syncStatus} s3SyncStatus={s3SyncStatus} />
+          </div>
         </div>
         
         <div className={cn(
@@ -283,19 +299,10 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
         <div className="space-y-1">
           <AnimatePresence>
             {filteredEntries.length === 0 ? (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="flex flex-col items-center justify-center h-48 text-white/30"
-              >
-                <div className="w-12 h-12 rounded-full bg-white/[0.03] flex items-center justify-center mb-3">
-                  <Icons.shield className="h-5 w-5 opacity-50" />
-                </div>
-                <p className="text-xs mb-1">{searchQuery ? 'No matches found' : 'Your vault is empty'}</p>
-                {!searchQuery && (
-                  <p className="text-[10px] text-white/20">Click the + button to add your first item</p>
-                )}
-              </motion.div>
+              <EmptyState
+                searchQuery={searchQuery}
+                filter={filter}
+              />
             ) : (
               filteredEntries.map((entry, index) => (
                 <EntryCard 
@@ -310,6 +317,72 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
         </div>
       </div>
     </div>
+  )
+}
+
+function EmptyState({ searchQuery, filter }: { searchQuery: string; filter: string }) {
+  const getMessage = () => {
+    if (searchQuery) {
+      return {
+        title: 'No matches found',
+        subtitle: 'Try a different search term',
+        icon: Icons.search
+      }
+    }
+    switch (filter) {
+      case 'favorite':
+        return {
+          title: 'No favorites yet',
+          subtitle: 'Star entries to see them here',
+          icon: Icons.star
+        }
+      case 'trash':
+        return {
+          title: 'Trash is empty',
+          subtitle: 'Deleted items appear here',
+          icon: Icons.trash
+        }
+      case 'login':
+        return {
+          title: 'No logins saved',
+          subtitle: 'Add your first login credentials',
+          icon: Icons.key
+        }
+      case 'card':
+        return {
+          title: 'No cards saved',
+          subtitle: 'Add your first payment card',
+          icon: Icons.card
+        }
+      case 'note':
+        return {
+          title: 'No notes saved',
+          subtitle: 'Add your first secure note',
+          icon: Icons.note
+        }
+      default:
+        return {
+          title: 'Your vault is empty',
+          subtitle: 'Click the + button to add your first item',
+          icon: Icons.shield
+        }
+    }
+  }
+
+  const { title, subtitle, icon: Icon } = getMessage()
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="flex flex-col items-center justify-center h-48 text-white/30"
+    >
+      <div className="w-12 h-12 rounded-full bg-white/[0.03] flex items-center justify-center mb-3">
+        <Icon className="h-5 w-5 opacity-50" />
+      </div>
+      <p className="text-xs mb-1">{title}</p>
+      <p className="text-[10px] text-white/20">{subtitle}</p>
+    </motion.div>
   )
 }
 
@@ -387,7 +460,12 @@ const EntryCard = memo(function EntryCard({ entry, index, onClick }: EntryCardPr
   const Icon = getIconForType(entry.type)
   const colorClass = getTypeColor(entry.type)
   const subtitle = getSubtitle(entry)
-  
+  const [faviconError, setFaviconError] = useState(false)
+
+  const faviconUrl = entry.type === 'login' && entry.login?.urls?.[0]
+    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(new URL(entry.login.urls[0]).hostname)}&sz=32`
+    : null
+
   return (
     <motion.button
       initial={{ opacity: 0, y: 5 }}
@@ -397,11 +475,20 @@ const EntryCard = memo(function EntryCard({ entry, index, onClick }: EntryCardPr
       className="w-full group flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/[0.04] active:bg-white/[0.06] transition-all duration-150 text-left"
     >
       <div className={cn(
-        "w-9 h-9 rounded-lg flex items-center justify-center transition-transform duration-200",
-        colorClass,
+        "w-9 h-9 rounded-lg flex items-center justify-center transition-transform duration-200 overflow-hidden",
+        !faviconUrl || faviconError ? colorClass : "bg-white/[0.06]",
         "group-hover:scale-105"
       )}>
-        <Icon className="h-4 w-4" />
+        {faviconUrl && !faviconError ? (
+          <img
+            src={faviconUrl}
+            alt=""
+            className="w-5 h-5"
+            onError={() => setFaviconError(true)}
+          />
+        ) : (
+          <Icon className="h-4 w-4" />
+        )}
       </div>
       
       <div className="flex-1 min-w-0">

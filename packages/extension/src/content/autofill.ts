@@ -579,13 +579,33 @@ async function showAutofillDropdown(
     document.addEventListener('click', activeDropdownCloseHandler!)
   }, 0)
   
-  const escapeHandler = (e: KeyboardEvent) => {
+  const keyboardHandler = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       closeActiveDropdown()
-      document.removeEventListener('keydown', escapeHandler)
+      document.removeEventListener('keydown', keyboardHandler)
+      return
+    }
+
+    const rows = body.querySelectorAll('.peach-credential-row')
+    const focusedRow = document.activeElement as HTMLElement
+    const currentIndex = Array.from(rows).indexOf(focusedRow)
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const nextIndex = currentIndex < rows.length - 1 ? currentIndex + 1 : 0
+      ;(rows[nextIndex] as HTMLElement)?.focus()
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      const prevIndex = currentIndex > 0 ? currentIndex - 1 : rows.length - 1
+      ;(rows[prevIndex] as HTMLElement)?.focus()
     }
   }
-  document.addEventListener('keydown', escapeHandler)
+  document.addEventListener('keydown', keyboardHandler)
+
+  setTimeout(() => {
+    const firstRow = body.querySelector('.peach-credential-row') as HTMLElement
+    firstRow?.focus()
+  }, 0)
 }
 
 function setInputValueNative(input: HTMLInputElement, value: string): void {
