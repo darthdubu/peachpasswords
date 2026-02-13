@@ -14,7 +14,6 @@ export interface ZipImportResult extends ImportResult {
 }
 
 const BW_CSV_LOGIN_URI_FIELD = 'login_uri'
-const BW_JSON_LOGIN_URIS_FIELD = 'uris'
 
 type GenericObject = Record<string, unknown>
 
@@ -174,16 +173,17 @@ function mapBitwardenRow(row: GenericObject): VaultEntry {
 }
 
 function mapGenericRow(row: GenericObject): VaultEntry {
-  // Handles Proton Pass and generic CSVs
-  // Proton: Name, Note, URL, Username, Password, TOTP
   const name = getString(row, ['name', 'Name', 'title', 'Title']) || 'Untitled'
   const username = getString(row, ['username', 'Username', 'login_username']) || ''
   const password = getString(row, ['password', 'Password', 'login_password']) || ''
-  const urls = normalizeUrls([
-    getString(row, ['url', 'URL', 'login_uri']),
+  
+  const url = getString(row, ['url', 'URL'])
+  const urls = normalizeUrls(url ? [url] : [
+    getString(row, ['login_uri']),
     getString(row, ['website', 'Website', 'website_url'])
   ])
-  const totp = getString(row, ['totp', 'TOTP', 'login_totp']) || ''
+  
+  const totp = getString(row, ['totp', 'TOTP', 'login_totp', 'totpUri']) || ''
   const note = getString(row, ['note', 'Note', 'notes', 'Notes']) || ''
 
   return {
@@ -194,10 +194,10 @@ function mapGenericRow(row: GenericObject): VaultEntry {
     modified: Date.now(),
     tags: [],
     favorite: false,
-    encryptedMetadata: '', // Will be encrypted by caller
+    encryptedMetadata: '',
     login: {
       username,
-      password, // Plain text, must be encrypted by caller
+      password,
       urls,
       totp: totp ? { 
         secret: totp,
@@ -250,94 +250,177 @@ function collectJsonCandidates(parsed: unknown): GenericObject[] {
 
 function mapJsonEntry(item: GenericObject): VaultEntry | null {
   const typeHint = (getString(item, ['type']) || '').toLowerCase()
-  const loginObj = getObject(item, ['login', 'content', 'itemContent'])
-
-  const username = getString(loginObj || item, [
-    'username',
-    'login_username',
-    'userName',
-    'email'
-  ]) || ''
-  const password = getString(loginObj || item, [
-    'password',
-    'login_password'
-  ]) || ''
-
-  const urls = extractUrlsFromJson(item, loginObj)
-  const hasLoginLikeData = !!password || !!username || urls.length > 0 || !!loginObj
-
-  if (!hasLoginLikeData && typeHint && typeHint !== 'login') {
-    // Skip non-login items for now to match current import behavior.
-    return null
-  }
-
+  const content = getObject(item, ['content', 'itemContent']) || item
+  const metadata = getObject(item, ['metadata']) || {}
+  
   const name = getString(item, ['name', 'title']) ||
-    getString(getObject(item, ['metadata']), ['name', 'title']) ||
+    getString(metadata, ['name', 'title']) ||
     'Untitled'
+  
   const note = getString(item, ['notes', 'note']) ||
-    getString(getObject(item, ['metadata']), ['note']) ||
+    getString(metadata, ['note']) ||
     ''
-  const totp = getString(loginObj || item, ['totp', 'otp', 'totpSecret']) || ''
-
+    
+  const favorite = parseBooleanLike(getString(item, ['favorite'])) ||
+    parseBooleanLike(getString(metadata, ['favorite']))
+    
   const tags = getStringArray(item, ['tags', 'tag']) ||
-    getStringArray(getObject(item, ['metadata']), ['tags']) ||
+    getStringArray(metadata, ['tags']) ||
     []
 
-  return {
+  const baseEntry = {
     id: crypto.randomUUID(),
-    type: 'login',
     name,
     created: Date.now(),
     modified: Date.now(),
     tags,
-    favorite: parseBooleanLike(getString(item, ['favorite'])),
-    encryptedMetadata: '', // Will be encrypted by caller
-    login: {
-      username,
-      password,
-      urls,
-      totp: totp ? {
-        secret: totp,
-        algorithm: 'SHA1',
-        digits: 6,
-        period: 30
-      } : undefined
-    },
+    favorite,
+    encryptedMetadata: '',
     note: note ? { content: note } : undefined
+  }
+
+  switch (typeHint) {
+    case 'creditCard':
+    case 'creditcard':
+      return mapCreditCard(item, content, baseEntry)
+    
+    case 'identity':
+      return mapIdentity(item, content, baseEntry)
+    
+    case 'note':
+      return {
+        ...baseEntry,
+        type: 'note' as const,
+        note: { content: note }
+      }
+    
+    case 'login':
+    default:
+      return mapLogin(item, content, baseEntry)
   }
 }
 
-function extractUrlsFromJson(item: GenericObject, loginObj?: GenericObject | null): string[] {
+function mapLogin(_item: GenericObject, content: GenericObject, baseEntry: Partial<VaultEntry>): VaultEntry {
+  const loginContent = getObject(content, ['login']) || content
+  
+  const username = getString(loginContent, ['username', 'email', 'userName']) || ''
+  const password = getString(loginContent, ['password']) || ''
+  const totpUri = getString(loginContent, ['totpUri', 'totp', 'otp']) || ''
+  
   const urls: string[] = []
-  const source = loginObj || item
-
-  const flatCandidates = [
-    getString(source, ['uri', 'url', 'website', 'origin']),
-    getString(item, ['uri', 'url', 'website'])
-  ]
-  urls.push(...flatCandidates.filter((value): value is string => !!value))
-
-  const bwUris = (source as GenericObject)[BW_JSON_LOGIN_URIS_FIELD] ?? (item as GenericObject)[BW_JSON_LOGIN_URIS_FIELD]
-  if (Array.isArray(bwUris)) {
-    for (const uriCandidate of bwUris) {
-      if (typeof uriCandidate === 'string') {
-        urls.push(uriCandidate)
-      } else if (isObject(uriCandidate)) {
-        const uriValue = getString(uriCandidate, ['uri', 'url'])
-        if (uriValue) urls.push(uriValue)
+  const itemUrls = getStringArray(loginContent, ['urls']) || getStringArray(content, ['urls'])
+  if (itemUrls) {
+    urls.push(...itemUrls)
+  }
+  const singleUrl = getString(loginContent, ['url', 'uri', 'website'])
+  if (singleUrl) {
+    urls.push(singleUrl)
+  }
+  
+  let totp = undefined
+  if (totpUri) {
+    const secret = extractTotpSecretFromUri(totpUri)
+    if (secret) {
+      totp = {
+        secret,
+        algorithm: 'SHA1',
+        digits: 6,
+        period: 30
       }
     }
   }
 
-  const domainCandidates = [
-    getString(source, ['domain']),
-    getString(source, ['hostname']),
-    getString(item, ['domain']),
-    getString(getObject(item, ['metadata']), ['domain', 'hostname'])
-  ]
-  urls.push(...domainCandidates.filter((value): value is string => !!value))
+  return {
+    ...baseEntry,
+    type: 'login',
+    login: {
+      username,
+      password,
+      urls: normalizeUrls(urls),
+      totp
+    }
+  } as VaultEntry
+}
 
-  return normalizeUrls(urls)
+function mapCreditCard(_item: GenericObject, content: GenericObject, baseEntry: Partial<VaultEntry>): VaultEntry {
+  const cardContent = getObject(content, ['creditCard']) || content
+  
+  const number = getString(cardContent, ['number', 'cardNumber']) || ''
+  const cvv = getString(cardContent, ['cvv', 'cvc', 'code']) || ''
+  const holder = getString(cardContent, ['cardHolder', 'cardholderName', 'holder']) || ''
+  const expMonth = getString(cardContent, ['expirationDate', 'expiry', 'expiration']) || ''
+  const pin = getString(cardContent, ['pin']) || ''
+
+  let expMonthValue = ''
+  let expYearValue = ''
+  
+  if (expMonth) {
+    const parts = expMonth.split('/')
+    if (parts.length === 2) {
+      expMonthValue = parts[0].trim()
+      expYearValue = parts[1].trim()
+    }
+  }
+
+  return {
+    ...baseEntry,
+    type: 'card',
+    card: {
+      number,
+      cvv,
+      holder,
+      expMonth: expMonthValue,
+      expYear: expYearValue,
+      pin
+    }
+  } as VaultEntry
+}
+
+function mapIdentity(_item: GenericObject, content: GenericObject, baseEntry: Partial<VaultEntry>): VaultEntry {
+  const identityContent = getObject(content, ['identity']) || content
+  
+  const fullName = getString(identityContent, ['fullName', 'full_name']) || ''
+  const email = getString(identityContent, ['email']) || ''
+  const phone = getString(identityContent, ['phone', 'phoneNumber', 'telephone']) || ''
+  
+  const addressContent = getObject(identityContent, ['address'])
+  const street = getString(addressContent || identityContent, ['street', 'streetAddress', 'address']) || ''
+  const city = getString(addressContent || identityContent, ['city']) || ''
+  const state = getString(addressContent || identityContent, ['state', 'province']) || ''
+  const zip = getString(addressContent || identityContent, ['zip', 'postalCode', 'postal_code', 'zipCode']) || ''
+  const country = getString(addressContent || identityContent, ['country']) || ''
+  
+  const nameParts = fullName.split(' ')
+  const firstName = nameParts[0] || ''
+  const lastName = nameParts.slice(1).join(' ') || ''
+
+  return {
+    ...baseEntry,
+    type: 'identity',
+    identity: {
+      firstName,
+      lastName,
+      email,
+      phone,
+      address: {
+        street,
+        city,
+        state,
+        zip,
+        country
+      }
+    }
+  } as unknown as VaultEntry
+}
+
+function extractTotpSecretFromUri(uri: string): string | null {
+  try {
+    const url = new URL(uri)
+    const secret = url.searchParams.get('secret')
+    return secret || null
+  } catch {
+    return uri.includes('=') ? uri.split('=').pop() || uri : uri
+  }
 }
 
 function normalizeUrls(values: Array<string | undefined | null>): string[] {
