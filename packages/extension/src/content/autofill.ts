@@ -1,6 +1,6 @@
 import { AUTOFILL_STYLES } from './autofill-styles'
 
-const DEBUG = false
+const DEBUG = true
 
 function log(...args: unknown[]): void {
   if (DEBUG) {

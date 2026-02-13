@@ -110,13 +110,17 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
   }, [deferredSearchQuery, entries, filter, getTrashedEntries])
 
   const currentSiteMatches = useMemo(() => {
+    console.log('[Peach Debug] currentSiteUrl:', currentSiteUrl)
+    console.log('[Peach Debug] allEntries count:', allEntries.length)
     if (!currentSiteUrl) return []
-    return allEntries
+    const matches = allEntries
       .filter(e => e.type === 'login' && e.login)
       .map(e => ({ entry: e, score: (e.login?.urls || []).reduce((b, u) => Math.max(b, getUrlMatchScore(u, currentSiteUrl)), 0) }))
       .filter(m => m.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 3)
+    console.log('[Peach Debug] currentSiteMatches:', matches.length)
+    return matches
   }, [currentSiteUrl, allEntries])
 
   const refreshCurrentSite = useCallback(() => {
