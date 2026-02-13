@@ -107,7 +107,7 @@ export async function parseZipImport(zipData: ArrayBuffer, fileName = 'archive.z
       try {
         const content = await file.async('string')
         
-        if (isPGPEncrypted(content)) {
+        if (isPGPEncrypted(content) || name.endsWith('.pgp') || name.endsWith('.asc')) {
           pgpFiles.push({ name: file.name, content })
         } else if (name.endsWith('.json') || name.endsWith('.csv') || content.trim().startsWith('[') || content.trim().startsWith('{')) {
           const parsed = parseImportFile(content, file.name)

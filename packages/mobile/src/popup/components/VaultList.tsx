@@ -1,6 +1,5 @@
-import React, { useState } from 'react'
-import { motion } from 'framer-motion'
-import { Search, Plus, Settings, Trash2, Star, Folder } from 'lucide-react'
+import { useState } from 'react'
+import { Search, Plus, Settings, Star } from 'lucide-react'
 import { Input } from './ui/input'
 import { Button } from './ui/button'
 import { useVault } from '../contexts/VaultContext'
@@ -13,7 +12,7 @@ interface VaultListProps {
 
 export function VaultList({ onSelectEntry, onAddEntry, onOpenSettings }: VaultListProps) {
   const [searchQuery, setSearchQuery] = useState('')
-  const { searchEntries, lockVault, vault } = useVault()
+  const { searchEntries, lockVault } = useVault()
   
   const entries = searchEntries(searchQuery)
   const favorites = entries.filter(e => e.favorite)
@@ -94,10 +93,9 @@ export function VaultList({ onSelectEntry, onAddEntry, onOpenSettings }: VaultLi
 
 function EntryRow({ entry, onClick }: { entry: any; onClick: () => void }) {
   return (
-    <motion.button
-      whileTap={{ scale: 0.98 }}
+    <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 p-3 rounded-lg bg-card hover:bg-accent transition-colors text-left"
+      className="w-full flex items-center gap-3 p-3 rounded-lg bg-card hover:bg-accent transition-colors text-left active:scale-[0.98]"
     >
       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#FFB07C]/20 to-[#FF8C69]/20 flex items-center justify-center flex-shrink-0">
         <span className="text-[#FFB07C] font-medium">
@@ -113,6 +111,6 @@ function EntryRow({ entry, onClick }: { entry: any; onClick: () => void }) {
       </div>
       
       {entry.favorite && <Star className="w-4 h-4 text-[#FFB07C] flex-shrink-0" />}
-    </motion.button>
+    </button>
   )
 }

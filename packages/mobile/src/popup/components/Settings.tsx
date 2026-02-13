@@ -1,5 +1,4 @@
-import React, { useState } from 'react'
-import { motion } from 'framer-motion'
+import { useState } from 'react'
 import { ArrowLeft, Trash2, Download, Upload, Cloud, Shield, Moon, Smartphone } from 'lucide-react'
 import { Button } from './ui/button'
 import { Switch } from './ui/switch'

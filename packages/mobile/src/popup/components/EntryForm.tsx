@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { useState } from 'react'
 import { ArrowLeft, Save, Plus, Trash2, RefreshCw, Star } from 'lucide-react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -20,9 +19,9 @@ export function EntryForm({ entryId, onCancel, onSave }: EntryFormProps) {
   const [username, setUsername] = useState(existingEntry?.login?.username || '')
   const [password, setPassword] = useState(existingEntry?.login?.password || '')
   const [urls, setUrls] = useState<string[]>(existingEntry?.login?.urls || [''])
-  const [note, setNote] = useState(existingEntry?.note || '')
+  const [note, setNote] = useState<string>(String(existingEntry?.note || ''))
   const [favorite, setFavorite] = useState(existingEntry?.favorite || false)
-  const [type, setType] = useState(existingEntry?.type || 'login')
+  const type = existingEntry?.type || 'login'
 
   const handleSave = () => {
     if (!name.trim()) {

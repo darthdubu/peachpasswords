@@ -104,6 +104,11 @@ packages/mobile/
 
 ## Setup
 
+### Prerequisites
+- Node.js 18+
+- Java 21 (required for Android build)
+- Android SDK (via Android Studio)
+
 1. Install dependencies:
 ```bash
 cd packages/mobile
@@ -117,9 +122,9 @@ npx cap add android
 
 3. Copy native plugin files:
 ```bash
-# The plugin files in src/android-plugin/ need to be copied to:
-# android/app/src/main/java/com/peach/plugin/
-# This happens automatically during sync
+# The plugin files are automatically copied during the build process
+# Manual copy if needed:
+cp src/android-plugin/peachvault/src/main/java/com/peach/plugin/*.kt android/app/src/main/java/com/peach/plugin/
 ```
 
 4. Sync Capacitor:
@@ -131,6 +136,33 @@ npm run sync
 ```bash
 npm run android
 ```
+
+### Building APK
+
+**Debug APK:**
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+cd android
+./gradlew assembleDebug
+```
+
+APK location: `android/app/build/outputs/apk/debug/app-debug.apk`
+
+**Release APK:**
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+cd android
+./gradlew assembleRelease
+```
+
+APK location: `android/app/build/outputs/apk/release/app-release.apk`
+
+### Pre-built APK
+
+A debug APK has been built and is available at:
+`/artifacts/peach-android-debug.apk`
+
+**Note:** The app is named "Peach" (not Lotus) as requested.
 
 ## Android Manifest Configuration
 

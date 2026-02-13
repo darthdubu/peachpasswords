@@ -1,5 +1,4 @@
-import React, { useState } from 'react'
-import { motion } from 'framer-motion'
+import { useState } from 'react'
 import { ArrowLeft, Edit2, Trash2, Copy, Eye, EyeOff, Star } from 'lucide-react'
 import { Button } from './ui/button'
 import { useVault } from '../contexts/VaultContext'
@@ -30,6 +29,9 @@ export function EntryDetail({ entryId, onBack, onEdit }: EntryDetailProps) {
     navigator.clipboard.writeText(text)
     toast.success(`${label} copied`)
   }
+
+  const username = entry.login?.username || ''
+  const password = entry.login?.password || ''
 
   const handleToggleFavorite = () => {
     updateEntry({ ...entry, favorite: !entry.favorite })
@@ -80,20 +82,20 @@ export function EntryDetail({ entryId, onBack, onEdit }: EntryDetailProps) {
           <div className="space-y-4">
             <Field 
               label="Username"
-              value={entry.login.username}
-              onCopy={() => handleCopy(entry.login.username, 'Username')}
+              value={username}
+              onCopy={() => handleCopy(username, 'Username')}
             />
             
             <Field 
               label="Password"
-              value={entry.login.password}
+              value={password}
               type="password"
               showValue={showPassword}
               onToggleShow={() => setShowPassword(!showPassword)}
-              onCopy={() => handleCopy(entry.login.password, 'Password')}
+              onCopy={() => handleCopy(password, 'Password')}
             />
 
-            {entry.login.urls?.length > 0 && (
+            {entry.login.urls && entry.login.urls.length > 0 && (
               <div className="space-y-2">
                 <label className="text-sm text-muted-foreground">Websites</label>
                 {entry.login.urls.map((url, i) => (
@@ -110,7 +112,7 @@ export function EntryDetail({ entryId, onBack, onEdit }: EntryDetailProps) {
           <div className="space-y-2">
             <label className="text-sm text-muted-foreground">Notes</label>
             <div className="p-3 bg-muted rounded-lg whitespace-pre-wrap">
-              {entry.note}
+              {String(entry.note)}
             </div>
           </div>
         )}

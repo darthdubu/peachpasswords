@@ -1,8 +1,7 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
 import { Vault, VaultEntry } from '@lotus/shared'
 import { storage } from '../../lib/storage'
 import { STORAGE_KEYS } from '../../lib/constants'
-import type { EncryptedSettings } from '../../lib/crypto-utils'
 
 interface VaultContextType {
   vault: Vault | null
@@ -64,7 +63,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const unlockVault = useCallback(async (password: string): Promise<boolean> => {
+  const unlockVault = useCallback(async (): Promise<boolean> => {
     setIsLoading(true)
     setError(null)
     try {
@@ -99,7 +98,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const unlockWithPin = useCallback(async (pin: string): Promise<boolean> => {
+  const unlockWithPin = useCallback(async (): Promise<boolean> => {
     setIsLoading(true)
     try {
       // TODO: Implement PIN unlock
@@ -118,7 +117,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     storage.session.clear()
   }, [])
 
-  const createVault = useCallback(async (password: string) => {
+  const createVault = useCallback(async () => {
     setIsLoading(true)
     try {
       const newVault: Vault = {
