@@ -51,6 +51,16 @@ export function EntryForm({ initialEntry, onSave, onCancel }: EntryFormProps) {
   const [url, setUrl] = useState(initialEntry?.login?.urls?.[0] || '')
   const [totpSecret, setTotpSecret] = useState('')
   const [showGenerator, setShowGenerator] = useState(false)
+
+  useEffect(() => {
+    if (!url && name && type === 'login') {
+      const domainMatch = name.match(/^([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)$/)
+      if (domainMatch) {
+        const possibleUrl = `https://${domainMatch[1].toLowerCase()}`
+        setUrl(possibleUrl)
+      }
+    }
+  }, [name, url, type])
   const [genNonce, setGenNonce] = useState(0)
   const [genOpts, setGenOpts] = useState<PasswordOptions>({ length: 20, useNumbers: true, useSymbols: true, useUppercase: true })
 
@@ -194,11 +204,28 @@ export function EntryForm({ initialEntry, onSave, onCancel }: EntryFormProps) {
               </div>
 
               <div>
-                <label className="text-xs text-white/40 mb-1.5 block">Website URL</label>
+                <label className="text-xs text-white/40 mb-1.5 block flex items-center gap-1">
+                  Website URL
+                  <span className="text-[10px] text-amber-400/80">(required for autofill)</span>
+                </label>
                 <div className="relative">
                   <Icons.link className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
-                  <Input type="url" placeholder="https://example.com" value={url} onChange={(e) => setUrl(e.target.value)} className="pl-9 bg-white/[0.03] border-white/[0.08] text-white placeholder:text-white/30" />
+                  <Input 
+                    type="url" 
+                    placeholder="https://example.com/login" 
+                    value={url} 
+                    onChange={(e) => setUrl(e.target.value)} 
+                    className={cn(
+                      "pl-9 bg-white/[0.03] border-white/[0.08] text-white placeholder:text-white/30",
+                      !url && "border-amber-500/30 focus:border-amber-500/50"
+                    )}
+                  />
                 </div>
+                {!url && (
+                  <p className="text-[10px] text-amber-400/60 mt-1">
+                    Without a URL, Peach cannot auto-fill this login on websites.
+                  </p>
+                )}
               </div>
 
               <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.08] space-y-2">
