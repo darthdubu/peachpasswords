@@ -2,6 +2,7 @@ import { VaultEntry } from '@lotus/shared'
 import Papa from 'papaparse'
 import JSZip from 'jszip'
 import { normalizeStoredUrl } from './url-match'
+import { isPGPEncrypted, decryptPGPMessage } from './pgp'
 
 export interface ImportResult {
   entries: VaultEntry[]
@@ -45,6 +46,31 @@ export function parseCSV(content: string): ImportResult {
   return { entries, errors }
 }
 
+export function isPGPEncryptedFile(content: string): boolean {
+  return isPGPEncrypted(content)
+}
+
+export async function decryptAndParseImportFile(
+  content: string,
+  passphrase: string,
+  fileName?: string
+): Promise<ImportResult> {
+  if (!isPGPEncrypted(content)) {
+    return parseImportFile(content, fileName)
+  }
+
+  const decryptionResult = await decryptPGPMessage(content, passphrase)
+
+  if (!decryptionResult.success) {
+    return {
+      entries: [],
+      errors: [`PGP decryption failed: ${decryptionResult.error}`]
+    }
+  }
+
+  return parseImportFile(decryptionResult.decryptedContent || '', fileName)
+}
+
 export function parseImportFile(content: string, fileName?: string): ImportResult {
   const trimmed = content.trim()
   const lowerName = (fileName || '').toLowerCase()
@@ -52,7 +78,6 @@ export function parseImportFile(content: string, fileName?: string): ImportResul
 
   if (looksLikeJson) {
     const jsonResult = parseJSON(content)
-    // If JSON parse fails hard, fallback to CSV in case extension/type is wrong.
     if (jsonResult.entries.length > 0 || jsonResult.errors.length === 0) return jsonResult
   }
 

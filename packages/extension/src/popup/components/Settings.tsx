@@ -10,7 +10,7 @@ import { Icons } from './icons'
 import { STORAGE_KEYS } from '../../lib/constants'
 import { cn } from '@/lib/utils'
 import QRCode from 'react-qr-code'
-import { parseImportFile, parseZipImport } from '../../lib/importers'
+import { parseImportFile, parseZipImport, isPGPEncryptedFile, decryptAndParseImportFile } from '../../lib/importers'
 import { appendExtensionError, clearExtensionErrors, readExtensionErrors, type ExtensionErrorRecord } from '../../lib/error-log'
 import { EncryptedSettings, loadVaultHeader } from '../../lib/crypto-utils'
 import type { Share } from '@lotus/shared'
@@ -113,13 +113,18 @@ export function Settings({ onBack }: { onBack: () => void }) {
   const [importMode, setImportMode] = useState<'append' | 'merge'>('merge')
   const [importPreview, setImportPreview] = useState<{
     fileName: string
-    fileType: 'csv' | 'json' | 'zip' | 'unknown'
+    fileType: 'csv' | 'json' | 'zip' | 'pgp' | 'unknown'
     entryCount: number
     errorCount: number
     zipTotalFiles?: number
     zipSupportedFiles?: number
+    isPGPEncrypted?: boolean
   } | null>(null)
   const [importPreviewErrors, setImportPreviewErrors] = useState<string[]>([])
+  const [pgpPassphrase, setPgpPassphrase] = useState('')
+  const [showPgpPrompt, setShowPgpPrompt] = useState(false)
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
+  const [pendingImportContent, setPendingImportContent] = useState<string>('')
   const importPreviewEntriesRef = useRef<ReturnType<typeof parseImportFile>['entries']>([])
   const [s3Endpoint, setS3Endpoint] = useState('https://s3.fr-par.scw.cloud')
   const [s3Region, setS3Region] = useState('fr-par')
@@ -608,6 +613,7 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
       let errors: string[] = []
       let zipTotalFiles: number | undefined
       let zipSupportedFiles: number | undefined
+      let isPGPEncrypted = false
 
       if (lowerName.endsWith('.zip')) {
         const parsedZip = await parseZipImport(await file.arrayBuffer(), file.name)
@@ -616,7 +622,25 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
         zipTotalFiles = parsedZip.totalFiles
         zipSupportedFiles = parsedZip.supportedFiles
       } else {
-        const parsed = parseImportFile(await file.text(), file.name)
+        const content = await file.text()
+        
+        if (isPGPEncryptedFile(content)) {
+          isPGPEncrypted = true
+          setPendingImportFile(file)
+          setPendingImportContent(content)
+          setShowPgpPrompt(true)
+          setImportStatus('PGP-encrypted file detected. Please enter your passphrase.')
+          setImportPreview({
+            fileName: file.name,
+            fileType: 'pgp',
+            entryCount: 0,
+            errorCount: 0,
+            isPGPEncrypted: true
+          })
+          return
+        }
+        
+        const parsed = parseImportFile(content, file.name)
         entries = parsed.entries
         errors = parsed.errors
       }
@@ -631,11 +655,12 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
             ? 'json'
             : lowerName.endsWith('.csv')
               ? 'csv'
-              : 'unknown',
+              : isPGPEncrypted ? 'pgp' : 'unknown',
         entryCount: entries.length,
         errorCount: errors.length,
         zipTotalFiles,
-        zipSupportedFiles
+        zipSupportedFiles,
+        isPGPEncrypted
       })
       setImportStatus(entries.length > 0 ? `Ready to import ${entries.length} entries.` : 'No valid entries found.')
     } catch (err) {
@@ -646,6 +671,39 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
         category: 'import-failed',
         message: err instanceof Error ? err.message : 'Unknown import error',
         details: file.name
+      })
+    }
+  }
+
+  const handlePgpDecrypt = async () => {
+    if (!pendingImportFile || !pendingImportContent || !pgpPassphrase) return
+    
+    setImportStatus('Decrypting PGP file...')
+    try {
+      const parsed = await decryptAndParseImportFile(pendingImportContent, pgpPassphrase, pendingImportFile.name)
+      
+      importPreviewEntriesRef.current = parsed.entries
+      setImportPreviewErrors(parsed.errors.slice(0, 8))
+      setImportPreview({
+        fileName: pendingImportFile.name,
+        fileType: 'json',
+        entryCount: parsed.entries.length,
+        errorCount: parsed.errors.length,
+        isPGPEncrypted: false
+      })
+      setImportStatus(parsed.entries.length > 0 ? `Ready to import ${parsed.entries.length} entries.` : 'No valid entries found.')
+      setShowPgpPrompt(false)
+      setPgpPassphrase('')
+      setPendingImportFile(null)
+      setPendingImportContent('')
+    } catch (err) {
+      console.error(err)
+      setImportStatus('Failed to decrypt PGP file. Check your passphrase.')
+      void appendExtensionError({
+        source: 'import',
+        category: 'pgp-decrypt-failed',
+        message: err instanceof Error ? err.message : 'PGP decryption failed',
+        details: pendingImportFile.name
       })
     }
   }
@@ -1299,9 +1357,47 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
             className="text-xs"
           />
           <p className="text-xs text-muted-foreground">
-            Supports Bitwarden and Proton Pass CSV/JSON exports, plus Proton Pass ZIP bundles.
+            Supports Bitwarden and Proton Pass CSV/JSON exports, PGP-encrypted exports, plus Proton Pass ZIP bundles.
           </p>
-          {importPreview ? (
+          {showPgpPrompt ? (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
+              <p className="text-xs font-medium text-amber-400">PGP-Encrypted File Detected</p>
+              <p className="text-xs text-muted-foreground">
+                Enter your Proton Pass export passphrase to decrypt:
+              </p>
+              <Input
+                type="password"
+                placeholder="Enter passphrase"
+                value={pgpPassphrase}
+                onChange={(e) => setPgpPassphrase(e.target.value)}
+                className="text-xs bg-white/[0.03]"
+              />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => void handlePgpDecrypt()}
+                  disabled={!pgpPassphrase}
+                  className="bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+                >
+                  Decrypt & Import
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setShowPgpPrompt(false)
+                    setPgpPassphrase('')
+                    setPendingImportFile(null)
+                    setPendingImportContent('')
+                    setImportPreview(null)
+                    setImportStatus('')
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : importPreview ? (
             <div className="rounded-md border border-border/60 bg-card/30 p-2.5 space-y-2">
               <p className="text-xs font-medium text-foreground">Import Summary</p>
               <p className="text-xs text-muted-foreground">
