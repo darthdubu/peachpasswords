@@ -1,4 +1,5 @@
-import { generateShares, reconstructSecret, Share } from '@lotus/shared'
+import { generateShares, reconstructSecret } from '@lotus/shared'
+import type { Share } from '@lotus/shared'
 
 export interface RecoveryKit {
   shares: Share[]

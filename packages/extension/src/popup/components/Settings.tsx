@@ -13,6 +13,7 @@ import QRCode from 'react-qr-code'
 import { parseImportFile, parseZipImport } from '../../lib/importers'
 import { appendExtensionError, clearExtensionErrors, readExtensionErrors, type ExtensionErrorRecord } from '../../lib/error-log'
 import { EncryptedSettings, loadVaultHeader } from '../../lib/crypto-utils'
+import type { Share } from '@lotus/shared'
 import { hasBiometricCredential, clearBiometricCredential, registerBiometric, getBiometricSupportInfo, getLastBiometricError } from '../../lib/biometric'
 import { hasPin, clearPin, setPin } from '../../lib/pin'
 import type { SecurityScore } from '../../lib/sync-types'
@@ -831,6 +832,8 @@ export function Settings({ onBack }: { onBack: () => void }) {
             </Button>
           </SettingsSectionCard>
 
+          <RecoveryKeySection />
+
           <SettingsSectionCard title="Security Score" subtitle="Snapshot of vault hygiene">
             {securityScoreLoading ? (
               <p className="text-sm text-muted-foreground">Calculating score...</p>
@@ -1390,5 +1393,156 @@ export function Settings({ onBack }: { onBack: () => void }) {
         </div>
       )}
     </div>
+  )
+}
+
+function RecoveryKeySection() {
+  const { masterKey, vault } = useVaultState()
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false)
+  const [recoveryShares, setRecoveryShares] = useState<Share[] | null>(null)
+  const [passwordPromptOpen, setPasswordPromptOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+
+  const handleGenerate = async () => {
+    if (!masterKey || !vault) return
+    setPasswordPromptOpen(true)
+  }
+
+  const verifyAndGenerate = async () => {
+    try {
+      setError('')
+      const result = await chrome.storage.local.get(['salt'])
+      if (!result.salt) {
+        setError('Salt not found')
+        return
+      }
+
+      const { attemptVaultUnlockWithMigration } = await import('../../lib/crypto-utils')
+      const vaultHeader = await loadVaultHeader()
+      const unlockAttempt = await attemptVaultUnlockWithMigration(password, new Uint8Array(result.salt), vaultHeader)
+
+      if (!unlockAttempt.success || !unlockAttempt.result) {
+        setError('Incorrect password')
+        return
+      }
+
+      const { generateShares } = await import('@lotus/shared')
+      
+      const rawKey = await crypto.subtle.exportKey('raw', masterKey!)
+      const keyBytes = new Uint8Array(rawKey)
+      const shares = generateShares(keyBytes, 5, 3)
+      keyBytes.fill(0)
+
+      setRecoveryShares(shares)
+      setShowRecoveryModal(true)
+      setPasswordPromptOpen(false)
+      setPassword('')
+    } catch (err) {
+      setError('An error occurred')
+    }
+  }
+
+  const handleDownload = () => {
+    if (!recoveryShares) return
+    const kit = {
+      shares: recoveryShares,
+      threshold: 3,
+      totalShares: 5,
+      createdAt: Date.now(),
+              vaultHint: 'My Vault'
+    }
+    const { downloadRecoveryKit } = require('../../lib/recovery')
+    downloadRecoveryKit(kit)
+  }
+
+  return (
+    <>
+      <SettingsSectionCard title="Recovery Key" subtitle="Backup your vault access">
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Generate a recovery key to regain access if you forget your master password.
+            Store the 5 recovery shares in separate secure locations.
+          </p>
+          <Button
+            onClick={handleGenerate}
+            variant="outline"
+            size="sm"
+            disabled={!masterKey}
+            className="w-full"
+          >
+            <Icons.key className="mr-2 h-4 w-4" />
+            Generate Recovery Key
+          </Button>
+        </div>
+      </SettingsSectionCard>
+
+      {passwordPromptOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-lg border border-border bg-card p-4 shadow-lg">
+            <h4 className="mb-2 text-sm font-semibold">Generate Recovery Key</h4>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Enter your master password to generate recovery shares.
+            </p>
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Master password"
+              className="mb-3 h-9"
+            />
+            {error && <p className="mb-3 text-xs text-red-500">{error}</p>}
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                onClick={() => {
+                  setPasswordPromptOpen(false)
+                  setPassword('')
+                  setError('')
+                }}
+              >
+                Cancel
+              </Button>
+              <Button size="sm" className="flex-1" onClick={verifyAndGenerate} disabled={!password}>
+                Generate
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRecoveryModal && recoveryShares && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card p-4 shadow-lg max-h-[90vh] overflow-y-auto">
+            <h4 className="mb-2 text-sm font-semibold">Recovery Key Generated</h4>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Store these 5 shares in separate secure locations. You need any 3 to recover your vault.
+            </p>
+            <div className="space-y-2 mb-4">
+              {recoveryShares.map((share, i) => (
+                <div key={share.index} className="p-2 rounded bg-white/[0.03] border border-white/[0.08]">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium">Share {i + 1}</span>
+                    <span className="text-[10px] text-white/40">Index: {share.index}</span>
+                  </div>
+                  <code className="text-[10px] font-mono text-white/60 break-all">{share.value}</code>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="flex-1" onClick={() => setShowRecoveryModal(false)}>
+                Close
+              </Button>
+              <Button size="sm" className="flex-1" onClick={handleDownload}>
+                <Icons.download className="mr-2 h-4 w-4" />
+                Download
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
