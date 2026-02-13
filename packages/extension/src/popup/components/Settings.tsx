@@ -669,25 +669,27 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
 
       if (lowerName.endsWith('.zip')) {
         const arrayBuffer = await file.arrayBuffer()
-        const content = new TextDecoder().decode(arrayBuffer.slice(0, 100))
         
-        if (isPGPEncryptedFile(content)) {
+        const parsedZip = await parseZipImport(arrayBuffer, file.name)
+        
+        if (parsedZip.pgpFiles.length > 0) {
           isPGPEncrypted = true
           setPendingImportFile(file)
-          setPendingImportContent(new TextDecoder().decode(arrayBuffer))
+          setPendingImportContent(JSON.stringify(parsedZip.pgpFiles))
           setShowPgpPrompt(true)
-          setImportStatus('PGP-encrypted ZIP detected. Please enter your passphrase.')
+          setImportStatus(`ZIP contains ${parsedZip.pgpFiles.length} PGP-encrypted file(s). Please enter your passphrase.`)
           setImportPreview({
             fileName: file.name,
             fileType: 'pgp',
             entryCount: 0,
             errorCount: 0,
+            zipTotalFiles: parsedZip.totalFiles,
+            zipSupportedFiles: parsedZip.supportedFiles,
             isPGPEncrypted: true
           })
           return
         }
         
-        const parsedZip = await parseZipImport(arrayBuffer, file.name)
         entries = parsedZip.entries
         errors = parsedZip.errors
         zipTotalFiles = parsedZip.totalFiles
@@ -752,59 +754,46 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
     setImportStatus('Decrypting PGP file...')
     try {
       const { decryptPGPMessage } = await import('../../lib/pgp')
-      const decryptionResult = await decryptPGPMessage(pendingImportContent, pgpPassphrase)
       
-      if (!decryptionResult.success) {
-        setImportStatus(`PGP decryption failed: ${decryptionResult.error}`)
-        return
-      }
-      
-      const decryptedContent = decryptionResult.decryptedContent!
       let entries: ReturnType<typeof parseImportFile>['entries'] = []
       let errors: string[] = []
       let zipTotalFiles: number | undefined
       let zipSupportedFiles: number | undefined
       
-      const isZip = decryptedContent.charCodeAt(0) === 0x50 && 
-                    decryptedContent.charCodeAt(1) === 0x4B &&
-                    decryptedContent.charCodeAt(2) === 0x03 &&
-                    decryptedContent.charCodeAt(3) === 0x04
-      
-      if (isZip || pendingImportFile.name.toLowerCase().endsWith('.zip')) {
-        const encoder = new TextEncoder()
-        const zipData = encoder.encode(decryptedContent)
-        const parsedZip = await parseZipImport(zipData.buffer, pendingImportFile.name)
-        entries = parsedZip.entries
-        errors = parsedZip.errors
-        zipTotalFiles = parsedZip.totalFiles
-        zipSupportedFiles = parsedZip.supportedFiles
-        
-        importPreviewEntriesRef.current = entries
-        setImportPreviewErrors(errors.slice(0, 8))
-        setImportPreview({
-          fileName: pendingImportFile.name,
-          fileType: 'zip',
-          entryCount: entries.length,
-          errorCount: errors.length,
-          zipTotalFiles,
-          zipSupportedFiles,
-          isPGPEncrypted: false
-        })
-      } else {
-        const parsed = parseImportFile(decryptedContent, pendingImportFile.name)
-        entries = parsed.entries
-        errors = parsed.errors
-        
-        importPreviewEntriesRef.current = entries
-        setImportPreviewErrors(errors.slice(0, 8))
-        setImportPreview({
-          fileName: pendingImportFile.name,
-          fileType: 'json',
-          entryCount: entries.length,
-          errorCount: errors.length,
-          isPGPEncrypted: false
-        })
+      let pgpFiles: { name: string; content: string }[] = []
+      try {
+        pgpFiles = JSON.parse(pendingImportContent)
+      } catch {
+        pgpFiles = [{ name: pendingImportFile.name, content: pendingImportContent }]
       }
+      
+      for (const pgpFile of pgpFiles) {
+        const decryptionResult = await decryptPGPMessage(pgpFile.content, pgpPassphrase)
+        
+        if (!decryptionResult.success) {
+          errors.push(`[${pgpFile.name}] Decryption failed: ${decryptionResult.error}`)
+          continue
+        }
+        
+        const decryptedContent = decryptionResult.decryptedContent!
+        const parsed = parseImportFile(decryptedContent, pgpFile.name)
+        entries.push(...parsed.entries)
+        for (const error of parsed.errors) {
+          errors.push(`[${pgpFile.name}] ${error}`)
+        }
+      }
+      
+      importPreviewEntriesRef.current = entries
+      setImportPreviewErrors(errors.slice(0, 8))
+      setImportPreview({
+        fileName: pendingImportFile.name,
+        fileType: 'zip',
+        entryCount: entries.length,
+        errorCount: errors.length,
+        zipTotalFiles,
+        zipSupportedFiles,
+        isPGPEncrypted: false
+      })
       
       setImportStatus(entries.length > 0 ? `Ready to import ${entries.length} entries.` : 'No valid entries found.')
       setShowPgpPrompt(false)

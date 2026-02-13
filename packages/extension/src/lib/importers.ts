@@ -84,37 +84,38 @@ export function parseImportFile(content: string, fileName?: string): ImportResul
   return parseCSV(content)
 }
 
-export async function parseZipImport(zipData: ArrayBuffer, fileName = 'archive.zip'): Promise<ZipImportResult> {
+export interface PGPZipImportResult extends ZipImportResult {
+  pgpFiles: { name: string; content: string }[]
+}
+
+export async function parseZipImport(zipData: ArrayBuffer, fileName = 'archive.zip'): Promise<PGPZipImportResult> {
   const entries: VaultEntry[] = []
   const errors: string[] = []
+  const pgpFiles: { name: string; content: string }[] = []
 
   try {
     const zip = await JSZip.loadAsync(zipData)
     const files = Object.values(zip.files).filter((file) => !file.dir)
-    const supported = files.filter((file) => {
+    
+    for (const file of files) {
       const name = file.name.toLowerCase()
-      return name.endsWith('.json') || name.endsWith('.csv')
-    })
-
-    if (supported.length === 0) {
-      return {
-        entries: [],
-        errors: [`No supported CSV/JSON files found in ${fileName}.`],
-        totalFiles: files.length,
-        supportedFiles: 0
-      }
-    }
-
-    for (const file of supported) {
-      try {
-        const content = await file.async('string')
-        const parsed = parseImportFile(content, file.name)
-        entries.push(...parsed.entries)
-        for (const error of parsed.errors) {
-          errors.push(`[${file.name}] ${error}`)
+      
+      if (name.endsWith('.json') || name.endsWith('.csv')) {
+        try {
+          const content = await file.async('string')
+          
+          if (isPGPEncrypted(content)) {
+            pgpFiles.push({ name: file.name, content })
+          } else {
+            const parsed = parseImportFile(content, file.name)
+            entries.push(...parsed.entries)
+            for (const error of parsed.errors) {
+              errors.push(`[${file.name}] ${error}`)
+            }
+          }
+        } catch (error) {
+          errors.push(`[${file.name}] Failed to extract file: ${error instanceof Error ? error.message : String(error)}`)
         }
-      } catch (error) {
-        errors.push(`[${file.name}] Failed to extract file: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
 
@@ -122,14 +123,16 @@ export async function parseZipImport(zipData: ArrayBuffer, fileName = 'archive.z
       entries,
       errors,
       totalFiles: files.length,
-      supportedFiles: supported.length
+      supportedFiles: entries.length > 0 ? entries.length : pgpFiles.length,
+      pgpFiles
     }
   } catch (error) {
     return {
       entries: [],
       errors: [`Failed to read ZIP archive ${fileName}: ${error instanceof Error ? error.message : String(error)}`],
       totalFiles: 0,
-      supportedFiles: 0
+      supportedFiles: 0,
+      pgpFiles: []
     }
   }
 }
