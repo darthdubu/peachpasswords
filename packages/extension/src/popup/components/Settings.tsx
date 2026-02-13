@@ -11,6 +11,7 @@ import { STORAGE_KEYS } from '../../lib/constants'
 import { cn } from '@/lib/utils'
 import QRCode from 'react-qr-code'
 import { parseImportFile, parseZipImport, isPGPEncryptedFile, decryptAndParseImportFile } from '../../lib/importers'
+import { encryptPGPMessage } from '../../lib/pgp'
 import { appendExtensionError, clearExtensionErrors, readExtensionErrors, type ExtensionErrorRecord } from '../../lib/error-log'
 import { EncryptedSettings, loadVaultHeader } from '../../lib/crypto-utils'
 import type { Share } from '@lotus/shared'
@@ -159,6 +160,8 @@ export function Settings({ onBack }: { onBack: () => void }) {
   })
   const [securityScoreLoading, setSecurityScoreLoading] = useState(false)
   const [extensionErrors, setExtensionErrors] = useState<ExtensionErrorRecord[]>([])
+  const [pgpExportPassphrase, setPgpExportPassphrase] = useState('')
+  const [showPgpExportPrompt, setShowPgpExportPrompt] = useState(false)
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -600,6 +603,55 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+  }
+
+  const handleExportPGP = async () => {
+    if (!vault) return
+    setShowPgpExportPrompt(true)
+  }
+
+  const handlePgpExportConfirm = async () => {
+    if (!vault || !pgpExportPassphrase) return
+
+    try {
+      const exportData = await Promise.all(vault.entries.map(async (entry) => {
+        const exported = { ...entry }
+        if (exported.login?.password) {
+          try {
+            exported.login = { ...exported.login }
+            exported.login.password = await decryptValue(entry.login!.password, entry.id, entry.modified)
+          } catch (e) {
+            console.error('Failed to decrypt password for export', e)
+          }
+        }
+        return exported
+      }))
+
+      const jsonContent = JSON.stringify(exportData, null, 2)
+      const encryptionResult = await encryptPGPMessage(jsonContent, pgpExportPassphrase)
+
+      if (!encryptionResult.success) {
+        setImportStatus(`PGP encryption failed: ${encryptionResult.error}`)
+        return
+      }
+
+      const blob = new Blob([encryptionResult.encryptedContent!], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `peach-export-${new Date().toISOString().split('T')[0]}.pgp`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      setShowPgpExportPrompt(false)
+      setPgpExportPassphrase('')
+      setImportStatus('PGP-encrypted export downloaded successfully.')
+    } catch (err) {
+      console.error(err)
+      setImportStatus('Failed to create PGP-encrypted export.')
+    }
   }
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1207,18 +1259,58 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
       return (
         <>
           <SettingsSectionCard title="Vault Export" subtitle="Download your vault data">
-            <div className="space-y-2">
-              <Button variant="outline" className="w-full justify-start" onClick={handleExport}>
-                <Icons.download className="mr-2 h-4 w-4" />
-                Export as JSON (decrypted)
-              </Button>
-              <Button variant="outline" className="w-full justify-start" onClick={handleExportCsv}>
-                <Icons.download className="mr-2 h-4 w-4" />
-                Export as CSV
-              </Button>
-            </div>
+            {showPgpExportPrompt ? (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 space-y-3">
+                <p className="text-xs font-medium text-amber-400">PGP-Encrypted Export</p>
+                <p className="text-xs text-muted-foreground">
+                  Set a passphrase to encrypt your export. You'll need this passphrase to decrypt the file later.
+                </p>
+                <Input
+                  type="password"
+                  placeholder="Enter passphrase"
+                  value={pgpExportPassphrase}
+                  onChange={(e) => setPgpExportPassphrase(e.target.value)}
+                  className="text-xs bg-white/[0.03]"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => void handlePgpExportConfirm()}
+                    disabled={!pgpExportPassphrase || pgpExportPassphrase.length < 8}
+                    className="bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+                  >
+                    Encrypt & Export
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setShowPgpExportPrompt(false)
+                      setPgpExportPassphrase('')
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Button variant="outline" className="w-full justify-start" onClick={handleExport}>
+                  <Icons.download className="mr-2 h-4 w-4" />
+                  Export as JSON (decrypted)
+                </Button>
+                <Button variant="outline" className="w-full justify-start" onClick={handleExportCsv}>
+                  <Icons.download className="mr-2 h-4 w-4" />
+                  Export as CSV
+                </Button>
+                <Button variant="outline" className="w-full justify-start" onClick={handleExportPGP}>
+                  <Icons.lock className="mr-2 h-4 w-4" />
+                  Export as PGP-Encrypted JSON
+                </Button>
+              </div>
+            )}
             <p className="text-xs text-muted-foreground mt-3">
-              JSON includes all data. CSV includes only logins. Keep exports secure.
+              JSON includes all data. CSV includes only logins. PGP encryption protects your export with a passphrase. Keep exports secure.
             </p>
           </SettingsSectionCard>
 
