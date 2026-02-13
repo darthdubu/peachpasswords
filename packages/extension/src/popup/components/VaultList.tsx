@@ -85,11 +85,13 @@ function SyncStatusIcon({ syncStatus, s3SyncStatus }: { syncStatus?: string; s3S
 }
 
 export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, syncStatus, s3SyncStatus }: VaultListProps) {
-  const { searchEntries, getTrashedEntries, restoreEntry, permanentlyDeleteEntry } = useVaultActions()
+  const { searchEntries, getTrashedEntries, restoreEntry, permanentlyDeleteEntry, deleteEntry, updateEntry } = useVaultActions()
   const { vault, lastSyncTime, s3LastSyncTime } = useVaultState()
   const [currentSiteUrl, setCurrentSiteUrl] = useState('')
   const [currentSiteHost, setCurrentSiteHost] = useState('')
   const [isSearchFocused, setIsSearchFocused] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [isBulkMode, setIsBulkMode] = useState(false)
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const allEntries = useMemo(() => (Array.isArray(vault?.entries) ? vault.entries.filter((entry) => !getTrashedAt(entry)) : []), [vault?.entries])
   const tabRefreshTimerRef = useRef<number | null>(null)
@@ -206,9 +208,34 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
     <div className="h-full flex flex-col">
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-sm font-medium text-white/90">{getFilterLabel(filter)}</h1>
+          {isBulkMode ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setIsBulkMode(false)
+                  setSelectedIds(new Set())
+                }}
+                className="text-xs text-white/60 hover:text-white/90"
+              >
+                Cancel
+              </button>
+              <span className="text-xs text-white/40">
+                {selectedIds.size} selected
+              </span>
+            </div>
+          ) : (
+            <h1 className="text-sm font-medium text-white/90">{getFilterLabel(filter)}</h1>
+          )}
           <div className="flex items-center gap-2">
-            {(lastSyncTime || s3LastSyncTime) && (
+            {(filter as string) !== 'trash' && !isBulkMode && (
+              <button
+                onClick={() => setIsBulkMode(true)}
+                className="text-[10px] text-white/40 hover:text-white/70 transition-colors"
+              >
+                Select
+              </button>
+            )}
+            {(lastSyncTime || s3LastSyncTime) && !isBulkMode && (
               <span className="text-[10px] text-white/30">
                 {(() => {
                   const lastSync = Math.max(lastSyncTime || 0, s3LastSyncTime || 0)
@@ -309,12 +336,71 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
                   key={entry.id} 
                   entry={entry} 
                   index={index}
-                  onClick={() => onSelectEntry(entry)} 
+                  onClick={() => onSelectEntry(entry)}
+                  isBulkMode={isBulkMode}
+                  isSelected={selectedIds.has(entry.id)}
+                  onToggleSelect={() => {
+                    const newSelected = new Set(selectedIds)
+                    if (newSelected.has(entry.id)) {
+                      newSelected.delete(entry.id)
+                    } else {
+                      newSelected.add(entry.id)
+                    }
+                    setSelectedIds(newSelected)
+                  }}
                 />
               ))
             )}
           </AnimatePresence>
         </div>
+
+        {isBulkMode && selectedIds.size > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="absolute bottom-0 left-0 right-0 p-3 bg-[#0d0d12] border-t border-white/[0.06] flex items-center justify-between"
+          >
+            <span className="text-xs text-white/60">{selectedIds.size} selected</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  if (confirm(`Delete ${selectedIds.size} items?`)) {
+                    for (const id of selectedIds) {
+                      await deleteEntry(id)
+                    }
+                    setSelectedIds(new Set())
+                    setIsBulkMode(false)
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-colors"
+              >
+                Delete
+              </button>
+              <button
+                onClick={() => {
+                  const tag = prompt('Enter tag to add:')
+                  if (tag) {
+                    for (const id of selectedIds) {
+                      const entry = vault?.entries.find(e => e.id === id)
+                      if (entry) {
+                        const tags = entry.tags || []
+                        if (!tags.includes(tag)) {
+                          updateEntry({ ...entry, tags: [...tags, tag] })
+                        }
+                      }
+                    }
+                    setSelectedIds(new Set())
+                    setIsBulkMode(false)
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg bg-white/[0.06] text-white/80 text-xs font-medium hover:bg-white/[0.10] transition-colors"
+              >
+                Add Tag
+              </button>
+            </div>
+          </motion.div>
+        )}
       </div>
     </div>
   )
@@ -454,16 +540,19 @@ interface EntryCardProps {
   entry: VaultEntry
   index: number
   onClick: () => void
+  isBulkMode?: boolean
+  isSelected?: boolean
+  onToggleSelect?: () => void
 }
 
-const EntryCard = memo(function EntryCard({ entry, index, onClick }: EntryCardProps) {
+const EntryCard = memo(function EntryCard({ entry, index, onClick, isBulkMode, isSelected, onToggleSelect }: EntryCardProps) {
   const Icon = getIconForType(entry.type)
   const colorClass = getTypeColor(entry.type)
   const subtitle = getSubtitle(entry)
   const [faviconError, setFaviconError] = useState(false)
 
   const faviconUrl = entry.type === 'login' && entry.login?.urls?.[0]
-    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(new URL(entry.login.urls[0]).hostname)}&sz=32`
+    ? `https://icons.duckduckgo.com/ip3/${encodeURIComponent(new URL(entry.login.urls[0]).hostname)}.ico`
     : null
 
   return (
@@ -471,13 +560,24 @@ const EntryCard = memo(function EntryCard({ entry, index, onClick }: EntryCardPr
       initial={{ opacity: 0, y: 5 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.02, duration: 0.2 }}
-      onClick={onClick}
-      className="w-full group flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/[0.04] active:bg-white/[0.06] transition-all duration-150 text-left"
+      onClick={isBulkMode ? onToggleSelect : onClick}
+      className={cn(
+        "w-full group flex items-center gap-3 p-2.5 rounded-lg transition-all duration-150 text-left",
+        isSelected ? "bg-primary/10" : "hover:bg-white/[0.04] active:bg-white/[0.06]"
+      )}
     >
+      {isBulkMode && (
+        <div className={cn(
+          "w-5 h-5 rounded border flex items-center justify-center transition-colors",
+          isSelected ? "bg-primary border-primary" : "border-white/20"
+        )}>
+          {isSelected && <Icons.check className="h-3 w-3 text-white" />}
+        </div>
+      )}
       <div className={cn(
-        "w-9 h-9 rounded-lg flex items-center justify-center transition-transform duration-200 overflow-hidden",
+        "w-9 h-9 rounded-lg flex items-center justify-center transition-transform duration-200 overflow-hidden shrink-0",
         !faviconUrl || faviconError ? colorClass : "bg-white/[0.06]",
-        "group-hover:scale-105"
+        !isBulkMode && "group-hover:scale-105"
       )}>
         {faviconUrl && !faviconError ? (
           <img

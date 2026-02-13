@@ -396,7 +396,7 @@ function createCredentialRow(
   
   if (hostname) {
     const img = document.createElement('img')
-    img.src = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=32`
+    img.src = `https://icons.duckduckgo.com/ip3/${encodeURIComponent(hostname)}.ico`
     img.alt = ''
     img.onerror = () => {
       img.style.display = 'none'
