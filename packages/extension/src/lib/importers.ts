@@ -100,22 +100,24 @@ export async function parseZipImport(zipData: ArrayBuffer, fileName = 'archive.z
     for (const file of files) {
       const name = file.name.toLowerCase()
       
-      if (name.endsWith('.json') || name.endsWith('.csv')) {
-        try {
-          const content = await file.async('string')
-          
-          if (isPGPEncrypted(content)) {
-            pgpFiles.push({ name: file.name, content })
-          } else {
-            const parsed = parseImportFile(content, file.name)
-            entries.push(...parsed.entries)
-            for (const error of parsed.errors) {
-              errors.push(`[${file.name}] ${error}`)
-            }
+      if (name.startsWith('__macosx/') || name.startsWith('._') || name.includes('/._')) {
+        continue
+      }
+      
+      try {
+        const content = await file.async('string')
+        
+        if (isPGPEncrypted(content)) {
+          pgpFiles.push({ name: file.name, content })
+        } else if (name.endsWith('.json') || name.endsWith('.csv') || content.trim().startsWith('[') || content.trim().startsWith('{')) {
+          const parsed = parseImportFile(content, file.name)
+          entries.push(...parsed.entries)
+          for (const error of parsed.errors) {
+            errors.push(`[${file.name}] ${error}`)
           }
-        } catch (error) {
-          errors.push(`[${file.name}] Failed to extract file: ${error instanceof Error ? error.message : String(error)}`)
         }
+      } catch (error) {
+        errors.push(`[${file.name}] Failed to extract file: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
 
