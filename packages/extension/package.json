@@ -30,6 +30,7 @@
     "hash-wasm": "^4.12.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.344.0",
+    "onnxruntime-web": "^1.24.1",
     "openpgp": "^5.11.1",
     "papaparse": "^5.5.3",
     "react": "^18.2.0",
