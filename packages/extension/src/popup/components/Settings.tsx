@@ -794,8 +794,14 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
         zipSupportedFiles,
         isPGPEncrypted: false
       })
-      
-      setImportStatus(entries.length > 0 ? `Ready to import ${entries.length} entries.` : 'No valid entries found.')
+
+      if (entries.length > 0) {
+        setImportStatus(`Ready to import ${entries.length} entries.`)
+      } else if (errors.length > 0) {
+        setImportStatus(`No valid entries found. Errors: ${errors.slice(0, 3).join('; ')}`)
+      } else {
+        setImportStatus('No valid entries found in decrypted file.')
+      }
       setShowPgpPrompt(false)
       setPgpPassphrase('')
       setPendingImportFile(null)
