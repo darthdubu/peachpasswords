@@ -28,6 +28,7 @@ interface VaultContextType {
   importEntries: (entries: VaultEntry[], options?: { mode?: 'append' | 'merge' }) => Promise<{ created: number; merged: number; skipped: number }>
   updateEntry: (entry: VaultEntry) => Promise<void>
   deleteEntry: (entryId: string) => Promise<void>
+  deleteEntries: (entryIds: string[]) => Promise<void>
   restoreEntry: (entryId: string) => Promise<void>
   permanentlyDeleteEntry: (entryId: string) => Promise<void>
   getEntry: (entryId: string) => VaultEntry | null
@@ -86,6 +87,7 @@ type VaultActionsContextType = Pick<
   | 'importEntries'
   | 'updateEntry'
   | 'deleteEntry'
+  | 'deleteEntries'
   | 'restoreEntry'
   | 'permanentlyDeleteEntry'
   | 'getEntry'
@@ -1139,6 +1141,46 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await logSecurityEvent('entry-deleted', 'info', { entryId })
   }, [clearDecryptCache, clearMetadataCache, exportAutofillData, getTrashRetentionDays, saveVault])
 
+  const deleteEntries = useCallback(async (entryIds: string[]) => {
+    const currentVault = vaultRef.current
+    const key = masterKeyRef.current
+    if (!currentVault || !key || entryIds.length === 0) return
+    
+    const retentionDays = await getTrashRetentionDays(key)
+    const now = Date.now()
+    const retentionMs = retentionDays * 24 * 60 * 60 * 1000
+    const entryIdSet = new Set(entryIds)
+
+    const newVault = {
+      ...currentVault,
+      entries: currentVault.entries.map((entry) => {
+        if (!entryIdSet.has(entry.id)) return entry
+        
+        return {
+          ...entry,
+          modified: now,
+          trashedAt: now,
+          trashExpiresAt: now + retentionMs
+        } as VaultEntry
+      }),
+      lastSync: now,
+      syncVersion: currentVault.syncVersion + 1
+    }
+
+    setVault(newVault)
+    clearDecryptCache()
+    clearMetadataCache()
+    
+    entryIds.forEach((entryId) => {
+      void enqueueSyncOperation({ kind: 'entry-upsert', entityId: entryId })
+    })
+    
+    await appendSyncEvent('sync-queued', `Moved ${entryIds.length} entries to trash`)
+    await saveVault(newVault, key)
+    await exportAutofillData(newVault, key)
+    await logSecurityEvent('entry-deleted', 'info', { entryCount: entryIds.length })
+  }, [clearDecryptCache, clearMetadataCache, exportAutofillData, getTrashRetentionDays, saveVault])
+
   const restoreEntry = useCallback(async (entryId: string) => {
     const currentVault = vaultRef.current
     const key = masterKeyRef.current
@@ -1662,6 +1704,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     importEntries,
     updateEntry,
     deleteEntry,
+    deleteEntries,
     restoreEntry,
     permanentlyDeleteEntry,
     getEntry,
@@ -1684,6 +1727,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     importEntries,
     updateEntry,
     deleteEntry,
+    deleteEntries,
     restoreEntry,
     permanentlyDeleteEntry,
     getEntry,

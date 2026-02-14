@@ -85,7 +85,7 @@ function SyncStatusIcon({ syncStatus, s3SyncStatus }: { syncStatus?: string; s3S
 }
 
 export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, syncStatus, s3SyncStatus }: VaultListProps) {
-  const { searchEntries, getTrashedEntries, restoreEntry, permanentlyDeleteEntry, deleteEntry, updateEntry } = useVaultActions()
+  const { searchEntries, getTrashedEntries, restoreEntry, permanentlyDeleteEntry, deleteEntries, updateEntry } = useVaultActions()
   const { vault, lastSyncTime, s3LastSyncTime } = useVaultState()
   const [currentSiteUrl, setCurrentSiteUrl] = useState('')
   const [currentSiteHost, setCurrentSiteHost] = useState('')
@@ -164,12 +164,63 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
 
   if (filter === 'trash') {
     const trashed = filteredEntries as VaultEntry[]
+    const [showClearConfirm, setShowClearConfirm] = useState(false)
+    const [isClearing, setIsClearing] = useState(false)
+
+    const handleClearTrash = async () => {
+      if (trashed.length === 0) return
+      setIsClearing(true)
+      try {
+        await Promise.all(trashed.map(entry => permanentlyDeleteEntry(entry.id)))
+      } finally {
+        setIsClearing(false)
+        setShowClearConfirm(false)
+      }
+    }
+
     return (
       <div className="h-full flex flex-col p-4">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-medium text-white/80">Trash</h2>
-          <span className="text-xs text-white/40">{trashed.length} items</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-white/40">{trashed.length} items</span>
+            {trashed.length > 0 && !showClearConfirm && (
+              <button
+                onClick={() => setShowClearConfirm(true)}
+                className="text-xs text-red-400 hover:text-red-300 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
+
+        {showClearConfirm && trashed.length > 0 && (
+          <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+            <p className="text-xs text-white/80 mb-2">
+              Permanently delete all {trashed.length} items?
+            </p>
+            <p className="text-[10px] text-white/50 mb-3">
+              This action cannot be undone.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                disabled={isClearing}
+                className="px-3 py-1.5 rounded-lg bg-white/[0.06] text-white/70 text-xs hover:bg-white/[0.10] transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleClearTrash()}
+                disabled={isClearing}
+                className="px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 text-xs hover:bg-red-500/30 transition-colors disabled:opacity-50"
+              >
+                {isClearing ? 'Clearing...' : 'Clear All'}
+              </button>
+            </div>
+          </div>
+        )}
         <div className="relative mb-3">
           <Icons.search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
           <input
@@ -380,9 +431,7 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
               <button
                 onClick={async () => {
                   if (confirm(`Delete ${selectedIds.size} items?`)) {
-                    for (const id of selectedIds) {
-                      await deleteEntry(id)
-                    }
+                    await deleteEntries(Array.from(selectedIds))
                     setSelectedIds(new Set())
                     setIsBulkMode(false)
                   }

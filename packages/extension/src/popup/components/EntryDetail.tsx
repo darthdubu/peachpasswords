@@ -247,8 +247,8 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps) {
             <div>
               <label className="text-xs text-white/40 mb-1.5 block">Password</label>
               <div className="flex gap-2">
-                <div className="flex-1 h-10 px-3 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center font-mono text-sm text-white/80">
-                  {showPassword ? decrypted.password || '' : '••••••••'}
+                <div className="flex-1 h-10 px-3 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center font-mono text-sm text-white/80 overflow-hidden">
+                  <span className="truncate">{showPassword ? decrypted.password || '' : '••••••••'}</span>
                 </div>
                 <button onClick={() => handleReveal('password')} disabled={decryptingField === 'password'} className="w-10 h-10 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center justify-center text-white/50 hover:text-white transition-colors">
                   {decryptingField === 'password' ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : showPassword ? <Icons.eyeOff className="h-4 w-4" /> : <Icons.eye className="h-4 w-4" />}
@@ -298,7 +298,9 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps) {
             <div>
               <label className="text-xs text-white/40 mb-1.5 block">Card Number</label>
               <div className="flex gap-2">
-                <div className="flex-1 h-10 px-3 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center font-mono text-sm text-white/80">{showCardNumber ? decrypted.cardNumber || '' : '•••• •••• •••• ••••'}</div>
+                <div className="flex-1 h-10 px-3 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center font-mono text-sm text-white/80 overflow-hidden">
+                  <span className="truncate">{showCardNumber ? decrypted.cardNumber || '' : '•••• •••• •••• ••••'}</span>
+                </div>
                 <button onClick={() => handleReveal('cardNumber')} disabled={decryptingField === 'cardNumber'} className="w-10 h-10 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center justify-center text-white/50 hover:text-white">{decryptingField === 'cardNumber' ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : showCardNumber ? <Icons.eyeOff className="h-4 w-4" /> : <Icons.eye className="h-4 w-4" />}</button>
                 <button onClick={() => handleCopy(decrypted.cardNumber || '', 'cardNumber')} className="w-10 h-10 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center justify-center text-white/50 hover:text-white">{copiedField === 'cardNumber' ? <Icons.check className="h-4 w-4 text-green-400" /> : <Icons.copy className="h-4 w-4" />}</button>
               </div>
@@ -311,7 +313,9 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps) {
               <div>
                 <label className="text-xs text-white/40 mb-1.5 block">CVV</label>
                 <div className="flex gap-2">
-                  <div className="flex-1 h-10 px-3 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center font-mono text-sm text-white/80">{showCvv ? decrypted.cvv || '' : '•••'}</div>
+                  <div className="flex-1 h-10 px-3 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center font-mono text-sm text-white/80 overflow-hidden">
+                  <span className="truncate">{showCvv ? decrypted.cvv || '' : '•••'}</span>
+                </div>
                   <button onClick={() => handleReveal('cvv')} disabled={decryptingField === 'cvv'} className="w-10 h-10 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center justify-center text-white/50 hover:text-white">{decryptingField === 'cvv' ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : showCvv ? <Icons.eyeOff className="h-4 w-4" /> : <Icons.eye className="h-4 w-4" />}</button>
                   <button onClick={() => handleCopy(decrypted.cvv || '', 'cvv')} className="w-10 h-10 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center justify-center text-white/50 hover:text-white">{copiedField === 'cvv' ? <Icons.check className="h-4 w-4 text-green-400" /> : <Icons.copy className="h-4 w-4" />}</button>
                 </div>
