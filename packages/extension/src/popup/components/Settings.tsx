@@ -19,8 +19,10 @@ import { hasBiometricCredential, clearBiometricCredential, registerBiometric, ge
 import { hasPin, clearPin, setPin } from '../../lib/pin'
 import type { SecurityScore } from '../../lib/sync-types'
 import { clearUnresolvedConflicts } from '../../lib/sync-conflicts'
+import { BreachMonitorSettings } from './BreachMonitorSettings'
+import { ZeroClickAutofillSettings } from './ZeroClickAutofillSettings'
 
-type SettingsCategory = 'appearance' | 'security' | 'sync' | 'backup' | 'import' | 'errors'
+type SettingsCategory = 'appearance' | 'security' | 'sync' | 'backup' | 'import' | 'autofill' | 'privacy' | 'errors'
 type SettingsIconKey = keyof typeof Icons
 const LAST_AUTH_METHOD_KEY = 'peach_last_auth_method'
 const SETTINGS_CATEGORY_STATE_KEY = 'peach_settings_category'
@@ -850,6 +852,7 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
   const categories: SettingsCategoryMeta[] = [
     { id: 'appearance', label: 'Appearance', description: 'Theme and accent styling', icon: 'settings' },
     { id: 'security', label: 'Security', description: 'Unlock controls and score', icon: 'lock' },
+    { id: 'autofill', label: 'Autofill', description: 'Zero-click and breach monitoring', icon: 'smartphone' },
     { id: 'sync', label: 'Sync', description: 'Server, S3, and timeline', icon: 'cloud' },
     { id: 'backup', label: 'Backup', description: 'Export encrypted data', icon: 'download' },
     { id: 'import', label: 'Import', description: 'Bring data from exports', icon: 'plus' },
@@ -1084,6 +1087,21 @@ KEEP THIS DOCUMENT SECURE AND CONFIDENTIAL.
               </>
             )}
             <Button onClick={handleSave} variant="outline" size="sm" className="w-full">Save Security Settings</Button>
+          </SettingsSectionCard>
+        </>
+      )
+    }
+
+    if (activeCategory === 'autofill') {
+      const { masterKey } = useVaultState()
+      return (
+        <>
+          <SettingsSectionCard title="Zero-Click Autofill" subtitle="Auto-fill on trusted sites">
+            <ZeroClickAutofillSettings masterKey={masterKey} />
+          </SettingsSectionCard>
+
+          <SettingsSectionCard title="Breach Monitoring" subtitle="Check credentials against Have I Been Pwned">
+            <BreachMonitorSettings masterKey={masterKey} />
           </SettingsSectionCard>
         </>
       )

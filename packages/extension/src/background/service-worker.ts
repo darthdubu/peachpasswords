@@ -867,6 +867,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true })
     return false
   }
-  
+
+  if (message.type === 'TOTP_QR_DETECTED') {
+    void chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon-48.png',
+      title: 'TOTP QR Code Detected',
+      message: `Found 2FA setup for ${message.data?.issuer || 'this site'}`,
+      buttons: [{ title: 'Save to Vault' }]
+    })
+    sendResponse({ success: true })
+    return false
+  }
+
+  if (message.type === 'PASSWORD_CHANGE_DETECTED') {
+    void chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon-48.png',
+      title: 'Password Change Detected',
+      message: 'Would you like to update the saved password?',
+      buttons: [{ title: 'Update' }, { title: 'Ignore' }]
+    })
+    sendResponse({ success: true })
+    return false
+  }
+
+  if (message.type === 'UPDATE_PASSWORD') {
+    void appendSyncEvent('sync-queued', `Password updated for ${message.data?.domain}`)
+    sendResponse({ success: true })
+    return false
+  }
+
   return false
 })

@@ -1,5 +1,7 @@
 import { AUTOFILL_STYLES } from './autofill-styles'
 import { AutofillService } from './autofill-service'
+import { totpQrDetector } from './totp-qr-detector'
+import { credentialCloning } from '../lib/credential-cloning'
 
 const DEBUG = true
 
@@ -732,24 +734,30 @@ function setupMutationObserver(): void {
 
 function init(): void {
   log('Initializing Peach autofill')
-  
+
   if (!isHttpsOrLocalhost()) {
     log('Not HTTPS or localhost - autofill disabled')
     return
   }
-  
+
+  totpQrDetector.start()
+
+  if (credentialCloning.detectPasswordChangeForm()) {
+    log('Password change form detected')
+  }
+
   processDetectedFields()
   setupMutationObserver()
-  
+
   chrome.runtime.sendMessage({
     type: 'AUTOFILL_PAGE_LOADED',
     payload: { url: window.location.href }
   }).catch(() => {})
-  
+
   setTimeout(() => {
     processDetectedFields()
   }, 1000)
-  
+
   setTimeout(() => {
     processDetectedFields()
   }, 3000)
@@ -766,6 +774,15 @@ function init(): void {
     if (event.type === 'form-detected') {
       processDetectedFields()
     } else if (event.type === 'credentials-submitted') {
+      const data = event.data as { username?: string; password?: string; entryId?: string }
+      if (data.username && data.password && data.entryId) {
+        credentialCloning.trackPasswordInput(
+          data.entryId,
+          window.location.hostname,
+          data.username,
+          data.password
+        )
+      }
       chrome.runtime.sendMessage({
         type: 'PEACH_CREDENTIALS_SUBMITTED',
         payload: event.data
@@ -805,6 +822,8 @@ export function cleanup(): void {
     autofillService.stop()
     autofillService = null
   }
+
+  totpQrDetector.stop()
 
   closeActiveDropdown()
 
