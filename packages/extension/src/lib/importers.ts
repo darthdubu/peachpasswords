@@ -77,11 +77,11 @@ export function parseImportFile(content: string, fileName?: string): ImportResul
   const looksLikeJson = lowerName.endsWith('.json') || trimmed.startsWith('{') || trimmed.startsWith('[')
 
   if (looksLikeJson) {
-    const jsonResult = parseJSON(content)
+    const jsonResult = parseJSON(trimmed)
     if (jsonResult.entries.length > 0 || jsonResult.errors.length === 0) return jsonResult
   }
 
-  return parseCSV(content)
+  return parseCSV(trimmed)
 }
 
 export interface PGPZipImportResult extends ZipImportResult {
@@ -96,18 +96,30 @@ export async function parseZipImport(zipData: ArrayBuffer, fileName = 'archive.z
   try {
     const zip = await JSZip.loadAsync(zipData)
     const files = Object.values(zip.files).filter((file) => !file.dir)
-    
+
     for (const file of files) {
       const name = file.name.toLowerCase()
-      
+
       if (name.startsWith('__macosx/') || name.startsWith('._') || name.includes('/._')) {
         continue
       }
-      
+
       try {
-        const content = await file.async('string')
-        
-        if (isPGPEncrypted(content) || name.endsWith('.pgp') || name.endsWith('.asc')) {
+        let content: string
+        const isPGPFile = name.endsWith('.pgp') || name.endsWith('.asc')
+
+        if (isPGPFile) {
+          try {
+            content = await file.async('string')
+          } catch {
+            const binary = await file.async('uint8array')
+            content = btoa(String.fromCharCode(...binary))
+          }
+        } else {
+          content = await file.async('string')
+        }
+
+        if (isPGPEncrypted(content) || isPGPFile) {
           pgpFiles.push({ name: file.name, content })
         } else if (name.endsWith('.json') || name.endsWith('.csv') || content.trim().startsWith('[') || content.trim().startsWith('{')) {
           const parsed = parseImportFile(content, file.name)

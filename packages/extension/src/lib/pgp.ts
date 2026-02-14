@@ -6,25 +6,54 @@ export interface PGPDecryptionResult {
   error?: string
 }
 
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
 export async function decryptPGPMessage(
   encryptedContent: string,
   passphrase: string
 ): Promise<PGPDecryptionResult> {
   try {
-    const message = await openpgp.readMessage({ armoredMessage: encryptedContent })
-    
-    const { data: decrypted } = await openpgp.decrypt({
-      message,
-      passwords: [passphrase],
-      format: 'binary'
-    })
-    
-    const decoder = new TextDecoder('utf-8')
-    const decryptedContent = decoder.decode(decrypted as Uint8Array)
-    
-    return {
-      success: true,
-      decryptedContent
+    const trimmed = encryptedContent.trim()
+    const isArmored = trimmed.includes('-----BEGIN PGP MESSAGE-----')
+
+    if (isArmored) {
+      const message = await openpgp.readMessage({ armoredMessage: encryptedContent })
+      const { data: decrypted } = await openpgp.decrypt({
+        message,
+        passwords: [passphrase],
+        format: 'binary'
+      })
+
+      const decoder = new TextDecoder('utf-8')
+      const decryptedContent = decoder.decode(decrypted as Uint8Array)
+
+      return {
+        success: true,
+        decryptedContent
+      }
+    } else {
+      const binaryData = base64ToUint8Array(encryptedContent)
+      const message = await openpgp.readMessage({ binaryMessage: binaryData })
+      const { data: decrypted } = await openpgp.decrypt({
+        message,
+        passwords: [passphrase],
+        format: 'binary'
+      })
+
+      const decoder = new TextDecoder('utf-8')
+      const decryptedContent = decoder.decode(decrypted as Uint8Array)
+
+      return {
+        success: true,
+        decryptedContent
+      }
     }
   } catch (error) {
     return {
