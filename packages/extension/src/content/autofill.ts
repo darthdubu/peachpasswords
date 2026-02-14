@@ -1,6 +1,9 @@
 import { AUTOFILL_STYLES } from './autofill-styles'
+import { AutofillService } from './autofill-service'
 
 const DEBUG = true
+
+let autofillService: AutofillService | null = null
 
 function log(...args: unknown[]): void {
   if (DEBUG) {
@@ -750,6 +753,30 @@ function init(): void {
   setTimeout(() => {
     processDetectedFields()
   }, 3000)
+
+  autofillService = new AutofillService({
+    autoFillOnLoad: false,
+    autoFillDelay: 2000,
+    triggerNotifications: true
+  })
+
+  autofillService.start((event) => {
+    log('Autofill service event:', event.type, event)
+
+    if (event.type === 'form-detected') {
+      processDetectedFields()
+    } else if (event.type === 'credentials-submitted') {
+      chrome.runtime.sendMessage({
+        type: 'PEACH_CREDENTIALS_SUBMITTED',
+        payload: event.data
+      }).catch(() => {})
+    } else if (event.type === 'save-requested') {
+      chrome.runtime.sendMessage({
+        type: 'PEACH_SAVE_REQUESTED',
+        payload: event.data
+      }).catch(() => {})
+    }
+  })
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -773,9 +800,14 @@ export function cleanup(): void {
     mutationObserver.disconnect()
     mutationObserver = null
   }
-  
+
+  if (autofillService) {
+    autofillService.stop()
+    autofillService = null
+  }
+
   closeActiveDropdown()
-  
+
   document.querySelectorAll('.peach-icon').forEach(icon => {
     if (icon.parentElement) {
       icon.parentElement.removeChild(icon)
