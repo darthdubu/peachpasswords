@@ -92,6 +92,8 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
   const [isSearchFocused, setIsSearchFocused] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isBulkMode, setIsBulkMode] = useState(false)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [isClearing, setIsClearing] = useState(false)
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const allEntries = useMemo(() => (Array.isArray(vault?.entries) ? vault.entries.filter((entry) => !getTrashedAt(entry)) : []), [vault?.entries])
   const tabRefreshTimerRef = useRef<number | null>(null)
@@ -164,8 +166,6 @@ export function VaultList({ filter, searchQuery, onSearchChange, onSelectEntry, 
 
   if (filter === 'trash') {
     const trashed = filteredEntries as VaultEntry[]
-    const [showClearConfirm, setShowClearConfirm] = useState(false)
-    const [isClearing, setIsClearing] = useState(false)
 
     const handleClearTrash = async () => {
       if (trashed.length === 0) return
